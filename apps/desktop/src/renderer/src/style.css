@@ -252,6 +252,20 @@ body {
 }
 .test-row .btn { margin-top: 0; }
 
+/* ===== 阶段 6：应用设置（开机自启 / 日志 / 诊断导出） ===== */
+.app-settings { margin-top: 10px; }
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+.toggle-row input { width: 15px; height: 15px; }
+.app-actions { display: flex; gap: 8px; margin-top: 8px; }
+.app-actions .btn { margin-top: 0; }
+
 /* ===== 阶段 3：底部 tab 栏 ===== */
 .tabbar {
   display: flex;

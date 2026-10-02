@@ -3,7 +3,7 @@
  *
  * - initNotifyLoop()（whenReady 调，幂等）：
  *   ① 启动清扫 sweepMissed()：已到期未触发 → fired=1 不补弹（§8「已过期不补弹，避免惊吓」），
- *      有清扫记录时 console.info 一行；
+ *      有清扫记录时 log.info 一行；
  *   ② 30s 间隔轮询（unref，不阻止进程退出）：dueEvents() 逐条弹 Electron Notification——
  *      标题「⏰ title」，内容 `${formatEventTime}（${relativeDayLabel}）`，备注换行附上；
  *      点通知 → showMainWindow() + 广播 appOpenTab {tab:'calendar'}；markFired(id) 后广播 eventChanged。
@@ -20,6 +20,7 @@ import { IPC, formatEventTime, relativeDayLabel } from '@fairy/core'
 import type { EventRecord } from '@fairy/core'
 import { getEventStore } from './events'
 import { broadcast, showMainWindow } from './windows'
+import { log } from './logger'
 
 const POLL_INTERVAL_MS = 30_000
 /** 退出提示里最多列 3 条标题 */
@@ -35,10 +36,10 @@ export function initNotifyLoop(): void {
   try {
     const swept = getEventStore().sweepMissed()
     if (swept > 0) {
-      console.info(`[notify] 启动清扫：${swept} 条已到期未触发的日程标记为已触发（不补弹）`)
+      log.info(`[notify] 启动清扫：${swept} 条已到期未触发的日程标记为已触发（不补弹）`)
     }
   } catch (err) {
-    console.warn('[notify] 启动清扫失败：', err instanceof Error ? err.message : err)
+    log.warn('[notify] 启动清扫失败：', err instanceof Error ? err.message : err)
   }
 
   timer = setInterval(tick, POLL_INTERVAL_MS)
@@ -67,7 +68,7 @@ export function shutdownNotifyLoop(): void {
       }).show()
     }
   } catch (err) {
-    console.warn('[notify] 退出提示失败：', err instanceof Error ? err.message : err)
+    log.warn('[notify] 退出提示失败：', err instanceof Error ? err.message : err)
   }
 }
 
@@ -77,7 +78,7 @@ function tick(): void {
   try {
     due = getEventStore().dueEvents()
   } catch (err) {
-    console.warn('[notify] 轮询查询失败：', err instanceof Error ? err.message : err)
+    log.warn('[notify] 轮询查询失败：', err instanceof Error ? err.message : err)
     return
   }
 
@@ -94,14 +95,14 @@ function tick(): void {
       })
       notification.show()
     } catch (err) {
-      console.warn('[notify] 通知弹出失败：', err instanceof Error ? err.message : err)
+      log.warn('[notify] 通知弹出失败：', err instanceof Error ? err.message : err)
     }
 
     try {
       getEventStore().markFired(ev.id)
       broadcast(IPC.eventChanged) // 面板「已触发」状态即时同步
     } catch (err) {
-      console.warn('[notify] markFired 失败：', err instanceof Error ? err.message : err)
+      log.warn('[notify] markFired 失败：', err instanceof Error ? err.message : err)
     }
   }
 }

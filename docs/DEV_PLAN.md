@@ -303,6 +303,11 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 3. 日志（electron-log，滚动 7 天）+ 一键诊断导出（版本/系统信息，不含账号凭据）。
 4. （可选，以后再说）自建 LLM 网关替换 sidecar：参考 `reference/deepseek-pp/core/deepseek/{pow.ts,request-codec.ts,stream-codec.ts}`——**MVP 不排期**，仅在 sidecar 停更/被禁时启动。
 
+**实施备注（2026-10-02 已落地）**：
+- ② DPAPI 走 Electron `safeStorage`（win32 下即 `CryptProtectData`）：零原生依赖（本机无 VS Build Tools，且 npm 上并无 `@kingsu/windows-dpapi`）；密件单独存 `secrets.dpapi.json`，`config.json` 只剩非敏感字段；`safeStorage` 不可用时降级明文并在诊断报告如实标注 `secretsProtected:false`。
+- ①「默认勾选」= NSIS 自定义安装选项页（`apps/desktop/resources/installer.nsh`；`/S` 静默安装也按默认开启）；**Run 值名必须是 AUMID `com.fairy.assistant`**（实测 Electron 39：值名不匹配时 `openAtLogin` 恒 false，只有 `executableWillLaunchAtLogin` 为 true），应用侧 `app.setLoginItemSettings` 传同一 `name`。
+- 网关二进制随包分发：`scripts/stage-extras.mjs` 预置 `resources/ds-free-api/`（不入 git；绝不复制 `config.toml`），`extraResources` 带进安装包/免安装包。
+
 **验收**：干净虚拟机从安装到完成首次登录 < 10 分钟；开机自启后托盘自动出现且日程提醒不丢失（错过的标"已过期"不补弹）。
 
 ---
@@ -398,5 +403,8 @@ CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT);
    set ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/
    pnpm package:win
    ```
+   `pnpm package:win` = `stage-extras`（预置网关二进制）→ `electron-vite build` → `electron-builder --win`；
+   产物：`apps/desktop/release/Fairy Setup <版本>.exe`（NSIS）+ `Fairy-<版本>-portable.exe`（免安装单 EXE）。
 5. `reference/deepseek-pp` 是嵌套 git 仓库（gitlink），仅为本地参考，不参与 Fairy 构建。
 6. 阶段 0 产物：`pnpm dev` 窗口+托盘正常；`release/Fairy Setup 0.0.1.exe`（NSIS，94MB）已验证可生成。
+7. **工具陷阱**：`npx asar extract-file <app.asar> package.json` 会把内容**写到当前目录**——曾把 `apps/desktop/package.json` 整个覆盖成打包精简版（scripts/devDependencies 丢失 → pnpm 顺手把 lockfile 裁掉 2800 行）。解包/检查产物请先 `cd` 到临时目录。

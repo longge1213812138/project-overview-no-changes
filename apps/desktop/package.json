@@ -1,5 +1,6 @@
 {
   "name": "@fairy/desktop",
+  "productName": "Fairy",
   "version": "0.0.1",
   "private": true,
   "description": "Fairy desktop app (Electron + React)",
@@ -8,11 +9,13 @@
     "dev": "set ELECTRON_RUN_AS_NODE=&& electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "package:win": "electron-vite build && electron-builder --win"
+    "stage:extras": "node scripts/stage-extras.mjs",
+    "package:win": "node scripts/stage-extras.mjs && electron-vite build && electron-builder --win"
   },
   "dependencies": {
     "@fairy/core": "workspace:*",
     "better-sqlite3": "^13.0.3",
+    "electron-log": "^5.4.4",
     "highlight.js": "^11.12.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

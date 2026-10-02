@@ -1,14 +1,14 @@
 # Fairy 项目交接材料
 
-> 交接编号：H6 ｜ 状态：**阶段 2/3/4/5 + 通道选择全部代码完成，待 GUI 验收** ｜ 更新时间：2026-09-27
+> 交接编号：H7 ｜ 状态：**阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化全部代码完成（含本机安装/自启/卸载烟测）；待 GUI 验收 + 干净虚拟机验收** ｜ 更新时间：2026-10-02
 > 工作目录（绝对路径）：`C:\Users\91533\Desktop\Fairy`
 
 ## 1. 任务与版本
 
 - **目标**：Fairy = Windows 桌面私人助手，以 **DeepSeek 网页版**（chat.deepseek.com 会话）为 LLM 后端，零 API 成本。MVP 范围 F1–F7 见 `docs/DEV_PLAN.md` §1。
 - **范围（MVP）**：聊天（流式）、多会话、"帮我记东西"、日程+托盘通知、FTS5 长期记忆、托盘/Alt+Space 浮窗/开机自启、登录引导流。明确不做：工具循环/Agent/Shell、Skill、MCP、云同步、多用户、cron 引擎。
-- **完成标准**：里程碑 M0–M4（见 DEV_PLAN §9），当前 **M0 已达成；MVP 阶段 2/3/4/5 + 通道选择全部代码完成（待人工 GUI 验收后打 m1/m2/m3，剩阶段 6 打包硬化）**。
-- **git 位置**：历史：
+- **完成标准**：里程碑 M0–M4（见 DEV_PLAN §9），当前 **M0 已达成；MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化全部代码完成（待 GUI 验收 + 干净虚拟机验收后打 m1/m2/m3/m4）**。
+- **git 位置**：历史（当前唯一提交 = 根提交 `b001520 "MVP"`，81 文件）：
   - `bf06919` 阶段 0：pnpm workspace + Electron 骨架 + 图标 + NSIS 打包通过
   - `b9932fe` docs：附录 C 本机环境备忘
   - `5573a02` + tag `m0`：阶段 1 LLM 桥接通（docs/llm-bridge-notes.md）
@@ -17,6 +17,7 @@
   - `129c655` 阶段 4：记忆（FTS5）+ 意图解析管线
   - `f4e61df` 通道选择：启动不自动登录，用户选 OpenAI API 或 DeepSeek 网页（§5.6）
   - `75876c5` 阶段 5：日程（意图 schedule_* + 通知轮询 + 面板）
+- **tag**：`m1`/`m2`/`m3` 已打在 `b001520`（用户指示先打，**GUI 验收尚未完成**；若验收后修复，用 `git tag -f m1 m2 m3` 移到修复提交）。`m0` 在历史提交 `5573a02`。
 - **文档版本**：`docs/DEV_PLAN.md` v0.2（需求收敛后的有效版本）。
 
 ## 2. 权威资料
@@ -42,6 +43,7 @@
 **Agent 自行选择（待用户推翻）**：
 - 浮窗 380×560、主窗口底部 tab（日程/记忆/设置）布局、上下文裁剪预算 6000 token 等 DEV_PLAN 参数。
 - 阶段 0 采用 electron-vite 模板结构。
+- **阶段 6 实施选择（2026-10-02）**：① DPAPI 用 Electron `safeStorage`（= CryptProtectData，零原生依赖；npm 无 `@kingsu/windows-dpapi`，本机也不能编译原生模块），密件单独存 `secrets.dpapi.json`；② 开机自启 Run 值名 = AUMID `com.fairy.assistant`（实测 Electron 39：值名不对则 `openAtLogin` 恒 false）；③ 打包随包分发 ds-free-api 网关二进制（`stage-extras.mjs` 预置，不入 git）；④ 网关 config.toml（含明文密码）停止/退出即删，下次启动重写。
 
 **用户新决定（2026-09-27）**：
 - **阶段 5（日程）**：一度暂缓，同日恢复并完成（见 §4 与 `75876c5`）。
@@ -65,15 +67,15 @@
 | 阶段 4 记忆 | ✅ **代码完成（2026-09-27），待人工 GUI 验收** | 迁移 v2（memories+trigram FTS+触发器，真实库 v1→v2 烟测升级成功）；意图 remember/forget/chat（失败兜底 chat）；检索三层候选+coverage×kind权重×0.95^天衰减 top-8（验收召回场景有单测）；chat 三步管线+空闲 5min 抽取；记忆面板（五色筛选/增删改/导出导入/onChanged 实时刷新）；测试 97/97 绿 |
 | 阶段 5 日程 | ✅ **代码完成（2026-09-27），待 GUI 验收** | 迁移 v3（events+索引，真实库 v2→v3 烟测）；意图 schedule_add/done/cancel/query（add 非法时间追问一次、不写脏数据）；notify-loop 30s 轮询→通知→点通知开日程 tab、启动 sweep 已过期不补弹、退出前未触发提示；CalendarPanel（今天/明天/全部/勾选/手动增删/徽章）；测试 137/137 绿 |
 | 通道选择（§5.6，插入需求） | ✅ **完成（2026-09-27），待 GUI 验收** | 启动零登录烟测通过（12s 零 ds-free-api 进程/零端口）；channel=null 选择卡、API 表单（baseUrl/key/model）、网页通道需手点「启动网关」才登录、切 API 自动停网关、过期指纹按通道门控（仅 web 上报托盘红） |
-| 阶段 6 打包硬化 | ⬜ 未开始 | 阶段 0 的 NSIS 已通，硬化项（自启默认勾选/DPAPI/日志）未做 |
+| 阶段 6 打包硬化 | ✅ **代码完成（2026-10-02），本机烟测通过，待干净虚拟机验收** | `electron-builder.yml`（NSIS+portable、extraResources 带网关二进制/双图标）+ `resources/installer.nsh`（安装选项页「开机自启」默认勾选，`/S` 也默认开；卸载清理 Run 键）+ `scripts/stage-extras.mjs`；凭据 DPAPI：`main/secrets.ts` + `config.ts` 重写（明文自动迁移、config.json 只剩非敏感字段）；日志 `main/logger.ts`（electron-log 按天滚动留 7 天 + 崩溃/子进程留痕）+ 诊断导出 `main/diagnostics.ts`（脱敏报告）+ 设置页「应用」区（自启开关/导出诊断/日志目录）+ `main/autostart.ts`。烟测：打包出 `Fairy Setup 0.0.1.exe`（112MB）+ `Fairy-0.0.1-portable.exe`（112MB）；静默安装→Run 键 `com.fairy.assistant` 写入→实机启动日志 `[autostart] openAtLogin=true`→静默卸载键/目录/卸载项全清；旧明文 config 自动迁移到 `secrets.dpapi.json`（protected:true，打包/开发两种上下文解密均成功），`config.json` 已无任何凭据；137 测试绿 + typecheck 绿 |
 
-代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent（阶段 2-4）；main 含 config/sidecar/ipc/chat/extract/windows/hotkeys；renderer 含 ChatPane/SessionSidebar/MemoryPanel/SettingsTab + 底部 tab。**尚未做**：calendar（阶段 5）、打包硬化（阶段 6）。无运行中的任务/进程（烟测已清理）。
+代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/SettingsTab（新增「应用」区）+ 底部 tab。**尚未做**：GUI 验收、干净虚拟机验收。无运行中的任务/进程（烟测已清理）。
 
 **已解决/已知事实**（原“未确认项”已全部落地）：ds-free-api v0.2.11 本机下载+运行 OK；账号池+device_id 登录 OK（凭据在 `%APPDATA%/fairy/config.json` 与 `~/.fairy-tools/.../config.toml`，明文，勿入 git）。
 
 ## 5. 接续动作
 
-**阶段 2/3/4/5 + 通道选择全部代码完成，下一步 = ① GUI 验收（合并清单） → 打 tag `m1`/`m2`/`m3` → ② 下一步由用户定（阶段 6 打包硬化 或 试用反馈迭代）**：
+**阶段 2/3/4/5 + 通道选择 + 阶段 6 全部代码完成，下一步 = ① GUI 验收（合并清单 1-7）+ 阶段 6 验收（清单 8）→ 移 tag `m1`/`m2`/`m3`/`m4` → ② 试用反馈迭代**：
 
 **① GUI 验收清单（阶段 2/3/4/5 + 通道选择合并，DEV_PLAN §6 各阶段验收 + §9 M2/M3）**：
 1. `pnpm dev`（新终端，Node 24，`ELECTRON_RUN_AS_NODE` 未被继承）。
@@ -99,7 +101,14 @@
    - 面板手动增删/勾选 → 对话查询实时一致（eventChanged）；
    - 重启后已过期未触发的日程标「已过期」**不补弹**；有未触发日程时退出 → 弹退出提示通知；
    - 时间非法表达 → 模型追问一次，不写脏数据。
-7. 通过后：`git tag m1 m2 m3`。
+7. ~~通过后：`git tag m1 m2 m3`~~ → **已提前执行（`b001520`）**；若验收发现问题，修复后再 `git tag -f m1 m2 m3` 移 tag。
+8. **阶段 6（打包硬化，M4 验收）**：
+   - `pnpm package:win`（附录 C 环境变量）→ 生成 `Fairy Setup 0.0.1.exe` + `Fairy-0.0.1-portable.exe`（本机已生成验证）；
+   - **干净虚拟机**：安装（注意安装选项页「开机自启」默认勾选）→ 首启选通道完成首次登录 < 10 分钟（网关二进制已随包，无需另装）；
+   - 重启虚拟机 → 托盘自动出现（日程提醒不丢：错过的标「已过期」不补弹）；取消勾选自启/应用内关闭自启 → 重启不再自启；卸载后 Run 键清理；
+   - 设置页「应用」区：自启开关状态与托盘菜单一致；「导出诊断信息」→ JSON 报告确认**不含账号凭据**（含日志尾部已脱敏）；「打开日志目录」→ `logs/fairy-YYYY-MM-DD.log`；
+   - 免安装单 EXE：直接双击可用（同样支持自启/日志/诊断）。
+   - （已本机验证：静默安装→Run 键写入→实机日志 `openAtLogin=true`→卸载全清；DPAPI 迁移+双上下文解密。）
 
 **② 阶段 5 已完成（`75876c5`，暂缓后同日恢复）**：迁移 v3 events 表、意图 schedule_*、notify-loop、CalendarPanel 均已落地（详见 §4）。
 
@@ -107,6 +116,6 @@
 
 ## 6. 交接简区
 
-- 编号：**H6**（H1-H5 已完成归档）
+- 编号：**H7**（H1-H6 已完成归档）
 - 源对话：本机 Pi 会话
-- 状态：阶段 2/3/4/5 + 通道选择全部代码完成（137 测试绿 + 启动零登录/迁移烟测通过），待 GUI 验收后打 m1/m2/m3；剩阶段 6 打包硬化
+- 状态：阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化全部代码完成（137 测试绿 + typecheck 绿 + 打包/安装/自启/卸载/DPAPI 迁移烟测通过）；tag `m1`/`m2`/`m3` 已打在 `b001520`（GUI 验收前打的，验收后如有修复需 `-f` 移 tag）；剩 GUI 验收 + 干净虚拟机验收（清单 §5 ①/⑧），过后打 `m4`

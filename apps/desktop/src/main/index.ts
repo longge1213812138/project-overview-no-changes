@@ -7,6 +7,8 @@ import { app, BrowserWindow, Menu, Notification, Tray, nativeImage } from 'elect
 import { join } from 'node:path'
 import { APP_NAME, FAIRY_VERSION } from '@fairy/core'
 import { initUserDataPath } from './config'
+import { initLogger, log } from './logger'
+import { AUTOSTART_RUN_NAME, isAutoStartEnabled, setAutoStart } from './autostart'
 import { initEvents } from './events'
 import { initNotifyLoop, shutdownNotifyLoop } from './notify-loop'
 import { initSidecar, shutdownSidecar } from './sidecar'
@@ -23,6 +25,9 @@ import { registerHotkeys, unregisterHotkeys } from './hotkeys'
 
 // DEV_PLAN §7：尽早把 userData 指到 %APPDATA%/fairy（小写 fairy），必须先于一切读取 userData 的逻辑
 initUserDataPath()
+initLogger() // 阶段 6：按天滚动日志（%APPDATA%/fairy/logs，保留 7 天）
+// Windows 通知（日程提醒）必须先设 AUMID，与 electron-builder 的 appId 一致，否则通知静默失败
+app.setAppUserModelId('com.fairy.assistant')
 
 let tray: Tray | null = null
 
@@ -34,7 +39,7 @@ function createTray(): void {
   // 托盘状态更新（红图标）逻辑注入 ipc.ts，保持本文件简洁
   registerTray(tray)
 
-  const autoStart = app.getLoginItemSettings().openAtLogin
+  const autoStart = isAutoStartEnabled()
 
   const menu = Menu.buildFromTemplate([
     { label: '打开主窗口', click: () => showMainWindow() },
@@ -43,7 +48,11 @@ function createTray(): void {
       label: '开机自启',
       type: 'checkbox',
       checked: autoStart,
-      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked })
+      click: (item) => {
+        // 与 NSIS 安装器（installer.nsh）写同一 Run 值名 'Fairy'，设置页开关共用真源
+        const now = setAutoStart(item.checked)
+        log.info(`[autostart] 托盘切换 → ${item.checked ? '开' : '关'}，实际=${now}`)
+      }
     },
     { type: 'separator' },
     {
@@ -51,7 +60,7 @@ function createTray(): void {
       click: () =>
         new Notification({
           title: APP_NAME,
-          body: `版本 ${FAIRY_VERSION}（阶段 3）`
+          body: `版本 ${FAIRY_VERSION}`
         }).show()
     },
     { label: '退出', click: () => app.quit() }
@@ -66,6 +75,9 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(() => {
+    log.info(
+      `[autostart] openAtLogin=${isAutoStartEnabled()}（Run 值名 ${AUTOSTART_RUN_NAME}）| userData=${app.getPath('userData')}`
+    )
     createMainWindow()
     createFloatWindow() // 预建隐藏：Alt+Space show 即出（DEV_PLAN §8 风险表）
     createTray()
@@ -94,11 +106,17 @@ app.on('before-quit', (event) => {
   }
   shuttingDown = true
   event.preventDefault()
+  log.info('[app] 退出中：收日程/通知 → 停网关')
   shutdownNotifyLoop()
   shutdownChat()
-  shutdownSidecar().finally(() => app.exit())
+  shutdownSidecar()
+    .catch((err) => log.warn('[app] 网关回收异常（不阻塞退出）：', String(err)))
+    .finally(() => {
+      log.info('[app] 退出完成')
+      app.exit()
+    })
 })
 
 app.on('window-all-closed', () => {
-  // MVP：留在托盘常驻；阶段 6 再加"是否退出"逻辑
+  // MVP：关窗后留在托盘常驻（自启后托盘自动出现，日程提醒不因关窗丢失）；退出只走托盘「退出」
 })

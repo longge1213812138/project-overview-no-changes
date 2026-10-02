@@ -9,15 +9,28 @@ files:
 # better-sqlite3 v13 自带 N-API prebuilds（ABI 稳定，node/electron 通用），
 # 无需 electron-rebuild（本机无 VS Build Tools，重建会直接报错）
 npmRebuild: false
+# extraResources：图标（托盘红图标由 main 按进程路径解析）+ ds-free-api 网关二进制
+# （resources/ds-free-api/ 由 scripts/stage-extras.mjs 从本机网关目录/FAIRY_GATEWAY_DIR 预置，
+#   不入 git；打包前 package:win 会自动 stage）
 extraResources:
   - from: resources/icon.png
     to: icon.png
+  - from: resources/icon-red.png
+    to: icon-red.png
+  - from: resources/ds-free-api
+    to: ds-free-api
 win:
   target:
     - nsis
+    - portable
   icon: resources/icon.ico
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  # 自定义脚本：开机自启选项（默认勾选）+ 卸载清理自启项（阶段 6 / DEV_PLAN §6.6.1）
+  include: installer.nsh
+portable:
+  # 单 EXE 免安装版（阶段 6 / DEV_PLAN §6.6.1）
+  artifactName: 'Fairy-${version}-portable.${ext}'
 publish: null

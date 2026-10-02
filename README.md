@@ -51,9 +51,11 @@ pnpm dev
 
 | 文件 | 内容 |
 |---|---|
-| `config.json` | 通道选择、OpenAI API 凭据、DeepSeek 账号凭据（MVP 明文，阶段 6 上 DPAPI） |
+| `config.json` | 明文非敏感项：通道选择、API baseUrl/model、网关二进制路径 |
+| `secrets.dpapi.json` | **凭据保险箱**：DeepSeek 账号+密码+device_id、网关 apiKey、OpenAI API Key，全部 **Windows DPAPI 加密**（绑定当前用户；旧明文自动迁移） |
 | `fairy.db` | SQLite（WAL）：sessions / messages / memories + memory_fts（trigram）/ events / kv（带幂等 schema 迁移，版本超限 fail-visible） |
-| `gateway/config.toml`、`gateway-data/` | 网关子进程的配置与运行产物（由 Fairy 生成管理） |
+| `logs/fairy-YYYY-MM-DD.log` | electron-log 按天滚动，保留 7 天；启动/通道/网关/日程/崩溃均留痕 |
+| `gateway/config.toml`、`gateway-data/` | 网关子进程的配置与运行产物（由 Fairy 生成管理；`config.toml` 含网关所需的明文密码，**网关停止/退出即删**，下次启动重写） |
 
 ## 开发
 
@@ -69,21 +71,36 @@ pnpm dev            # electron-vite 开发（已处理 ELECTRON_RUN_AS_NODE 陷�
 pnpm typecheck      # 全部 tsconfig
 pnpm test           # core 单元测试（137 用例，含真实网关 spawn 集成）
 pnpm build          # electron-vite 产物到 out/
-pnpm package:win    # NSIS 安装包到 release/（阶段 6 硬化中）
+pnpm package:win    # 打包：NSIS 安装包 + 免安装单 EXE → apps/desktop/release/
 ```
 
+`pnpm package:win` 会先跑 `scripts/stage-extras.mjs` 把 `ds-free-api` 网关二进制预置到
+`apps/desktop/resources/ds-free-api/`（不入 git）再构建；缺二进制时默认失败，
+可用 `FAIRY_GATEWAY_DIR=<含 ds-free-api.exe 的目录>` 指定来源。
+本机打包的完整命令（Node 路径 / 镜像 / 代理变量）见 `docs/DEV_PLAN.md` 附录 C。
+
 架构：renderer 只经 preload 的 `window.fairy`（契约 `packages/core/src/ipc.ts`）与 main 通信；LLM 流式、意图解析、记忆注入、日程轮询均在 main 侧编排；`better-sqlite3` 为 N-API 预编译（node/electron 通吃，无需 VS Build Tools）。
+
+## 打包硬化（阶段 6）
+
+- **安装包**：NSIS（`Fairy Setup x.y.z.exe`，可选安装目录；安装选项页「开机自启」**默认勾选**）
+  + **免安装单 EXE**（`Fairy-x.y.z-portable.exe`）；两者均随包分发 `ds-free-api` 网关二进制（网页通道在干净机器上开箱可用）。
+- **开机自启**：安装器写 `HKCU\...\Run\com.fairy.assistant`；应用内（托盘菜单 / 设置页）用
+  `app.setLoginItemSettings` 开关同一项，卸载自动清理。**验证自启请用打包产物**（开发态 exe 是 electron.exe）。
+- **凭据安全**：账号/密码/device_id/API Key 全部 DPAPI 加密（`secrets.dpapi.json`），旧明文自动迁移；诊断报告与日志均脱敏。
+- **日志**：`%APPDATA%\fairy\logs\fairy-YYYY-MM-DD.log`，按天滚动保留 7 天。
+- **一键诊断**：设置页 →「导出诊断信息」→ JSON 报告（版本/系统/通道与网关状态/存储/日志尾部，**不含账号凭据**）。
 
 ## 里程碑
 
 | 状态 | 内容 |
 |---|---|
 | ✅ | 阶段 0–5 + 通道选择（DEV_PLAN §6 / §5.6）：脚手架、LLM 桥、sidecar+登录引导、会话+聊天 UI+双窗口、记忆（FTS5）、日程（意图+通知+面板） |
-| ⏳ | 阶段 6 打包硬化：NSIS 自启默认勾选、凭据 DPAPI、滚动日志+诊断导出、网关二进制随包分发 |
+| ✅ | 阶段 6 打包硬化：NSIS 自启默认勾选 + 免安装 EXE、凭据 DPAPI、滚动日志+诊断导出、网关二进制随包分发（待干净虚拟机验收） |
 | 🏷 | `m0` 已打；`m1/m2/m3` 待 GUI 验收后补打（清单见 `PROJECT_STATE.md` §5） |
 
 ## 注意
 
 - `ds-free-api` 网关为 GPL 开源 sidecar（独立进程、独立二进制，不参与本仓库构建），**上游声明严禁商用**；商用场景请用 OpenAI 通道接官方 API。
-- 网页通道账号凭据 + device_id 目前明文存 `config.json`；请勿提交到任何仓库。
+- 账号凭据已 DPAPI 加密落盘（`secrets.dpapi.json`，仅当前 Windows 用户可解）；仍请勿把该文件或 `gateway/config.toml` 提交/外发。
 - 本机开发环境陷阱（Node 路径 / `ELECTRON_RUN_AS_NODE` / 镜像与代理）见 `docs/DEV_PLAN.md` 附录 C。

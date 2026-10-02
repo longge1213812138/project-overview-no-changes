@@ -9,6 +9,7 @@ import type {
   ChatDeltaEvent,
   ChatDoneEvent,
   ConfigureResult,
+  DiagnosticsExportResult,
   EventListFilter,
   EventRecord,
   FairyApi,
@@ -121,6 +122,16 @@ contextBridge.exposeInMainWorld(
       importMany: (raw: unknown): Promise<MemoryImportResult> =>
         ipcRenderer.invoke(IPC.memoryImport, raw),
       onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.memoryChanged, () => cb())
+    },
+
+    // ===== 阶段 6：打包硬化（开机自启 / 日志目录 / 一键诊断导出） =====
+    system: {
+      autoStart: (): Promise<boolean> => ipcRenderer.invoke(IPC.appAutoStartGet),
+      setAutoStart: (enabled: boolean): Promise<boolean> =>
+        ipcRenderer.invoke(IPC.appAutoStartSet, enabled),
+      exportDiagnostics: (): Promise<DiagnosticsExportResult> =>
+        ipcRenderer.invoke(IPC.appDiagnosticsExport),
+      openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.appOpenLogs)
     }
   } as unknown as FairyApi & { name: string; version: string })
 )

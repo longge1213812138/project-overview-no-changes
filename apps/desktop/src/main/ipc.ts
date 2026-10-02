@@ -53,6 +53,8 @@ import {
   startGatewayAction,
   stopGatewayAction
 } from './channel'
+import { isAutoStartEnabled, setAutoStart } from './autostart'
+import { exportDiagnostics, openLogsDir } from './diagnostics'
 
 let tray: Tray | null = null
 let normalIcon: Electron.NativeImage | null = null
@@ -290,6 +292,15 @@ export function registerIpcHandlers(): void {
     getEventStore().removeEvent(parseEventId(id))
     broadcast(IPC.eventChanged)
   })
+
+  // ===== 阶段 6：打包硬化（开机自启 / 日志目录 / 一键诊断导出） =====
+  ipcMain.handle(IPC.appAutoStartGet, () => isAutoStartEnabled())
+  ipcMain.handle(IPC.appAutoStartSet, (_event, enabled: unknown) => {
+    if (typeof enabled !== 'boolean') throw new Error('enabled 必须为布尔值')
+    return setAutoStart(enabled)
+  })
+  ipcMain.handle(IPC.appDiagnosticsExport, () => exportDiagnostics())
+  ipcMain.handle(IPC.appOpenLogs, () => openLogsDir())
 
   // 网关状态广播：sidecar onState → 全窗口 send；300ms 去抖合并高频变化
   let pending: GatewayState | null = null

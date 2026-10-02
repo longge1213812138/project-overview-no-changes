@@ -113,6 +113,18 @@ export interface FairyApi {
     /** 记忆经聊天管道变更（remember/forget/抽取）时广播 */
     onChanged(cb: () => void): () => void;
   };
+
+  // ===== 阶段 6：打包硬化（开机自启 / 日志 / 诊断） =====
+  system: {
+    /** 开机自启当前状态（托盘菜单与设置页共用同一真源） */
+    autoStart(): Promise<boolean>;
+    /** 开关开机自启；返回设置后的实际状态 */
+    setAutoStart(enabled: boolean): Promise<boolean>;
+    /** 一键诊断导出（弹保存框，返回报告路径） */
+    exportDiagnostics(): Promise<DiagnosticsExportResult>;
+    /** 打开日志目录（%APPDATA%/fairy/logs） */
+    openLogs(): Promise<void>;
+  };
 }
 
 // ===== 阶段 3：会话 + 聊天类型 =====
@@ -194,7 +206,12 @@ export const IPC = {
   eventComplete: 'event:complete',
   eventRemove: 'event:remove',
   eventChanged: 'event:changed',
-  appOpenTab: 'app:openTab'
+  appOpenTab: 'app:openTab',
+  // ===== 阶段 6：打包硬化（自启 / 日志 / 诊断导出） =====
+  appAutoStartGet: 'app:autoStartGet',
+  appAutoStartSet: 'app:autoStartSet',
+  appDiagnosticsExport: 'app:diagnosticsExport',
+  appOpenLogs: 'app:openLogs'
 } as const;
 
 // ===== 阶段 4：记忆类型 =====
@@ -283,3 +300,13 @@ export interface EventListFilter {
 
 /** 主窗口底部 tab（点系统通知后由 main 指定切换） */
 export type TabKey = 'chat' | 'calendar' | 'memory' | 'settings';
+
+// ===== 阶段 6：打包硬化 =====
+
+/** 一键诊断导出结果（报告含版本/系统/通道状态/日志尾部，**不含账号凭据**） */
+export interface DiagnosticsExportResult {
+  ok: boolean;
+  /** 报告 JSON 落盘路径（ok=true 时有值） */
+  path?: string;
+  error?: string;
+}

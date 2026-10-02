@@ -2,6 +2,9 @@ node_modules/
 out/
 release/
 dist/
+
+# 打包前置资源（scripts/stage-extras.mjs 生成；含 31MB 网关二进制，不入 git）
+apps/desktop/resources/ds-free-api/
 *.log
 .DS_Store
 Thumbs.db
@@ -12,3 +15,4 @@ Thumbs.db
 
 # VS Code 自动生成（非项目调试配置，开发用 pnpm dev）
 .vscode/
+.codeindex/

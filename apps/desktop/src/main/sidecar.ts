@@ -13,7 +13,7 @@
  * - 依赖单向：sidecar → config / core（不 import channel / chat，无环）。
  */
 import { app } from 'electron'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { createGatewayManager } from '@fairy/core'
 import type {
@@ -24,6 +24,7 @@ import type {
   GatewayState,
 } from '@fairy/core'
 import { loadConfig, saveConfig } from './config'
+import { log } from './logger'
 
 let manager: GatewayManager | null = null
 /** manager.onState 退订函数（换 manager 时先退订，防双监听） */
@@ -80,6 +81,18 @@ export function initSidecar(): void {
   mkdirSync(join(userData, 'gateway-data'), { recursive: true })
 }
 
+/**
+ * 网关 config.toml 里含 DeepSeek 明文密码（ds-free-api 启动必需，无法加密）——
+ * 停止即删，下次启动 manager.start() 会重写。把明文在盘的时间窗缩到“网关运行中”。
+ */
+function scrubGatewayConfig(): void {
+  try {
+    rmSync(join(app.getPath('userData'), 'gateway', 'config.toml'), { force: true })
+  } catch {
+    /* 尽力而为 */
+  }
+}
+
 /** 网关是否在运行（starting/ready = 子进程存活；stopped/error = 未运行） */
 function isRunning(): boolean {
   const status = manager?.getSnapshot().status
@@ -111,7 +124,7 @@ export async function startGateway(): Promise<{ ok: boolean; error?: string }> {
     try {
       await old.stop()
     } catch (err) {
-      console.warn('[sidecar] 旧网关停止异常，继续启动：', errMsg(err))
+      log.warn('[sidecar] 旧网关停止异常，继续启动：', errMsg(err))
     }
   }
 
@@ -142,6 +155,7 @@ export async function stopGateway(): Promise<void> {
   try {
     await manager?.stop()
   } finally {
+    scrubGatewayConfig() // 停止即擦掉含明文密码的 config.toml
     emitState()
   }
 }
@@ -247,7 +261,7 @@ export async function shutdownSidecar(): Promise<void> {
   stopping = true
   const timeout = new Promise<void>((resolve) => {
     const t = setTimeout(() => {
-      console.warn('[sidecar] 网关停止超时（3s），强制退出')
+      log.warn('[sidecar] 网关停止超时（3s），强制退出')
       resolve()
     }, 3000)
     t.unref?.()
@@ -255,6 +269,7 @@ export async function shutdownSidecar(): Promise<void> {
   try {
     await Promise.race([manager.stop(), timeout])
   } catch (err) {
-    console.warn('[sidecar] stop 异常，继续退出:', errMsg(err))
+    log.warn('[sidecar] stop 异常，继续退出:', errMsg(err))
   }
+  scrubGatewayConfig() // 退出前擦掉含明文密码的 config.toml（幂等）
 }

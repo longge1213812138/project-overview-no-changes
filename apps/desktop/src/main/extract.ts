@@ -5,7 +5,7 @@
  * - 到点时若生成中（isBusy）→ 顺延 1 分钟重试；空闲则取目标会话最近 20 条消息做一次非流式抽取调用。
  * - 解析：首个 balanced [...] → JSON.parse → 逐项校验 kind ∈ {preference,fact,decision,topic}
  *   （不含 note——note 是 remember 意图专用）且 content 非空 → memoryStore.add（add 自带去重，重复不炸）。
- * - 解析失败/异常 → console.warn 一行静默，绝不影响主流程；抽取期间用户发新消息 → reset 取消（AbortController）。
+ * - 解析失败/异常 → log.warn 一行静默，绝不影响主流程；抽取期间用户发新消息 → reset 取消（AbortController）。
  * - 成功 add ≥1 条 → onChanged（chat.ts 注入 → broadcast IPC.memoryChanged）。
  * - 退出安全：定时器 unref?.()；shutdown() 清定时器 + 取消进行中的抽取（chat.ts shutdownChat → before-quit）。
  *
@@ -13,6 +13,7 @@
  * 用 channel.ts 的 resolveActiveChannel 提供，api 通道也能抽取，无环）。
  */
 import type { LlmClient, MemoryKind, MemoryStore, MessageDto } from '@fairy/core'
+import { log } from './logger'
 
 /** §5.2：空闲 5 分钟触发 */
 export const IDLE_DELAY_MS = 5 * 60_000
@@ -148,13 +149,13 @@ export function createIdleExtractor(deps: IdleExtractionDeps): IdleExtractor {
           })
           added++
         } catch (err) {
-          console.warn('[memory-extract] 记忆入库失败：', err instanceof Error ? err.message : err)
+          log.warn('[memory-extract] 记忆入库失败：', err instanceof Error ? err.message : err)
         }
       }
       if (added > 0) deps.onChanged()
     } catch (err) {
       if (controller.signal.aborted) return // 取消：静默
-      console.warn('[memory-extract] 空闲记忆抽取失败：', err instanceof Error ? err.message : err)
+      log.warn('[memory-extract] 空闲记忆抽取失败：', err instanceof Error ? err.message : err)
     } finally {
       if (inflight === controller) inflight = null
     }

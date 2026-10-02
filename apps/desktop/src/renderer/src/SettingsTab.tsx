@@ -556,7 +556,95 @@ export default function SettingsTab() {
           )}
         </section>
       )}
+
+      {/* ===== E. 应用设置（阶段 6 打包硬化）：开机自启 / 日志 / 诊断导出 ===== */}
+      <AppSettingsSection />
     </div>
+  )
+}
+
+/** E. 应用设置（阶段 6 打包硬化 / DEV_PLAN §6.6）：开机自启开关 + 日志目录 + 一键诊断导出 */
+function AppSettingsSection() {
+  const [autoStart, setAutoStart] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<Feedback | null>(null)
+
+  useEffect(() => {
+    void window.fairy.system
+      .autoStart()
+      .then(setAutoStart)
+      .catch((e: unknown) => setMsg({ kind: 'err', text: `读取开机自启状态失败：${String(e)}` }))
+  }, [])
+
+  const handleToggle = async (next: boolean): Promise<void> => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const actual = await window.fairy.system.setAutoStart(next)
+      setAutoStart(actual)
+      setMsg({
+        kind: actual === next ? 'ok' : 'err',
+        text:
+          actual === next
+            ? next
+              ? '已开启开机自启：重启电脑后托盘自动出现，日程提醒不丢失'
+              : '已关闭开机自启'
+            : '设置未生效（写自启注册表项失败）'
+      })
+    } catch (e) {
+      setMsg({ kind: 'err', text: `设置开机自启失败：${String(e)}` })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleExport = async (): Promise<void> => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const res = await window.fairy.system.exportDiagnostics()
+      setMsg(
+        res.ok
+          ? { kind: 'ok', text: `诊断报告已导出：${res.path}` }
+          : res.error === '已取消'
+            ? { kind: 'ok', text: '已取消导出' }
+            : { kind: 'err', text: `导出失败：${res.error ?? '未知错误'}` }
+      )
+    } catch (e) {
+      setMsg({ kind: 'err', text: `导出失败：${String(e)}` })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="app-settings">
+      <h3>应用</h3>
+      <p className="section-hint">
+        开机自启随安装默认开启（安装选项页可改）；日志按天滚动、保留 7 天。诊断报告只含
+        版本/系统/通道状态与日志尾部，不含账号凭据。
+      </p>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={autoStart === true}
+          disabled={busy || autoStart === null}
+          onChange={(e) => void handleToggle(e.target.checked)}
+        />
+        <span>
+          开机自启（{autoStart === null ? '读取中…' : autoStart ? '已开启' : '已关闭'}）
+        </span>
+      </label>
+      <div className="app-actions">
+        <button className="btn" onClick={() => void handleExport()} disabled={busy}>
+          {busy ? '处理中…' : '导出诊断信息'}
+        </button>
+        <button className="btn btn-link" onClick={() => void window.fairy.system.openLogs()} disabled={busy}>
+          打开日志目录
+        </button>
+      </div>
+      {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
+    </section>
   )
 }
 

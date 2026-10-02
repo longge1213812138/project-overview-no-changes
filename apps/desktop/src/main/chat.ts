@@ -50,6 +50,7 @@ import { createIdleExtractor } from './extract'
 import type { IdleExtractor } from './extract'
 import { reportSessionExpired, reportSessionOk } from './sidecar'
 import { broadcast } from './windows'
+import { log } from './logger'
 
 let store: SessionStore | null = null
 
@@ -188,7 +189,7 @@ async function runGeneration(
   try {
     intent = await createIntentParser(client).parse(text, { signal })
   } catch (err) {
-    console.warn('[intent] 意图解析失败，按 chat 继续：', err instanceof Error ? err.message : err)
+    log.warn('[intent] 意图解析失败，按 chat 继续：', err instanceof Error ? err.message : err)
     intent = { intent: 'chat' }
   }
   // stop 竞态防御：已中止则不执行任何动作（失败路径不写脏数据；streamChat 会立即走 abort 分支）
@@ -216,7 +217,7 @@ async function runGeneration(
       }
     }
   } catch (err) {
-    console.warn('[memory] 记忆动作失败，按 chat 继续：', err instanceof Error ? err.message : err)
+    log.warn('[memory] 记忆动作失败，按 chat 继续：', err instanceof Error ? err.message : err)
     actionNote = ''
   }
 
@@ -293,7 +294,7 @@ async function runGeneration(
       }
     }
   } catch (err) {
-    console.warn('[calendar] 日程动作失败，按 chat 继续：', err instanceof Error ? err.message : err)
+    log.warn('[calendar] 日程动作失败，按 chat 继续：', err instanceof Error ? err.message : err)
     scheduleNote = ''
     confirmNote = ''
     scheduleExtra = ''
@@ -305,7 +306,7 @@ async function runGeneration(
     const memories = getMemoryStore().search(text, { topK: MEMORY_TOP_K })
     extraParts.push(formatMemoryBlock(memories))
   } catch (err) {
-    console.warn('[memory] 记忆检索失败：', err instanceof Error ? err.message : err)
+    log.warn('[memory] 记忆检索失败：', err instanceof Error ? err.message : err)
   }
   if (actionNote !== '') {
     extraParts.push(actionNote)
