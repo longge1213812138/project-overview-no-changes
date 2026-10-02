@@ -1,0 +1,14 @@
+node_modules/
+out/
+release/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# Pi 工具本地状态
+.pi/
+
+# VS Code 自动生成（非项目调试配置，开发用 pnpm dev）
+.vscode/

@@ -1,0 +1,16 @@
+{
+  "name": "fairy",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Fairy - Windows personal assistant powered by DeepSeek web session",
+  "scripts": {
+    "dev": "pnpm --filter @fairy/desktop dev",
+    "build": "pnpm --filter @fairy/desktop build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "package:win": "pnpm --filter @fairy/desktop package:win"
+  },
+  "engines": {
+    "node": ">=24.15.0"
+  }
+}

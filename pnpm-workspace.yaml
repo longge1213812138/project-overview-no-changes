@@ -1,0 +1,10 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# 允许以下依赖执行 install/postinstall 构建脚本（pnpm >=10 默认拦截）
+allowBuilds:
+  better-sqlite3: false # 自带 N-API prebuilds（prebuilds/win32-x64.node），无需编译；false = 拦截 pnpm 自动 gyp
+  electron: true
+  electron-winstaller: true
+  esbuild: true
