@@ -83,10 +83,15 @@ export interface FairyApi {
   agent: {
     /** 订阅审批请求（第一个响应生效；超时/停止/已受理会发 settled 关闭对话框） */
     onApproval(cb: (request: AgentApprovalRequest) => void): () => void;
-    /** 提交审批决定（id 必须来自 onApproval；重复/未知 id 静默忽略） */
-    respondApproval(id: number, approved: boolean): Promise<void>;
+    /**
+     * 提交审批决定。返回 true = main 已受理；false = id 陈旧/未知（已被超时/
+     * 另一窗口结算），调用方应以 getPendingApprovals 对账而非信任本地队列。
+     */
+    respondApproval(id: number, approved: boolean): Promise<boolean>;
     /** 订阅审批已结算（本窗口对话框应关闭） */
     onApprovalSettled(cb: (event: AgentApprovalSettledEvent) => void): () => void;
+    /** 权威对账：当前真正 pending 的审批列表（挂载/新请求/提交被忽略时拉取） */
+    getPendingApprovals(): Promise<AgentApprovalRequest[]>;
     /** 工具执行状态（可观测；日志真源在 main） */
     onToolNotice(cb: (notice: AgentToolNotice) => void): () => void;
   };
@@ -244,8 +249,10 @@ export const IPC = {
   agentApprovalRequest: 'agent:approvalRequest',
   /** main → renderer：审批已被受理/超时/取消（关闭其他窗口的待审对话框） */
   agentApprovalSettled: 'agent:approvalSettled',
-  /** renderer → main：提交审批决定 */
+  /** main → renderer：提交审批决定（返回是否被受理；false = 陈旧 id） */
   agentApprovalRespond: 'agent:approvalRespond',
+  /** renderer → main：拉取当前 pending 审批（权威对账） */
+  agentApprovalGetPending: 'agent:approvalGetPending',
   /** main → renderer：工具执行状态（requested/denied/started/completed/failed） */
   agentToolNotice: 'agent:toolNotice'
 } as const;

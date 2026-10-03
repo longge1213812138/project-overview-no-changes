@@ -5,9 +5,13 @@ import type { AgentApprovalRequest, AgentApprovalSettledEvent } from '@fairy/cor
  * 阶段 7：工具审批对话框（主窗与浮窗各挂一个实例，见 App.tsx；每窗口只订阅一次）。
  *
  * 契约（packages/core/src/ipc.ts FairyApi.agent）：
- * - onApproval 收请求入本地队列（一次只展示队首），respondApproval 提交决定；
- * - onApprovalSettled = 对话框关闭信号（另一窗口先响应 / 超时 / 生成中止），
- *   与本地提交共用同一个幂等 Set，重复 id 一律忽略；
+ * - onApproval 收请求入本地队列（一次只展示队首），respondApproval 提交决定
+ *   并返回是否被 main 受理（false = 陈旧 id，已被超时/另一窗口结算）；
+ * - onApprovalSettled = 对话框关闭信号，与本地提交共用幂等 Set；
+ * - **权威对账**：本地队列可能因订阅空窗期丢事件而与 main 的 pending 脱钩
+ *   （GUI 验收实测：陈旧条目占队首挡住新框、点击提交旧 id 被忽略导致真请求
+ *   60s 超时）。因此在挂载、收到新请求、提交被忽略三个时机拉取
+ *   getPendingApprovals() 以 main 为准校准队列，另有 65s 兜底过期。
  * - renderer 只展示与回传决定，不执行任何工具、不自行放行。
  */
 /** risk → 中文标签（配色见 style.css .risk-badge） */
@@ -27,6 +31,20 @@ const SOURCE_LABEL: Record<AgentApprovalRequest['tool']['source'], string> = {
 /** input 序列化展示上限：超过则截断并加省略注（防超大 payload 拖垮渲染） */
 const INPUT_PREVIEW_MAX = 2000
 
+/** 本地队列条目：请求 + 入队时间（对账保留新鲜条目、65s 兜底过期用） */
+interface QueueItem {
+  request: AgentApprovalRequest
+  receivedAt: number
+}
+
+/**
+ * 对账保留窗口：sync 快照返回与本地 onApproval 入队之间的竞态窗口内（<3s）
+ * 刚到的本地条目不因快照未含而被误删；>3s 仍不在快照 = settled 丢失的陈旧残留，删。
+ */
+const SYNC_FRESH_MS = 3_000
+/** main 60s 必然结算，65s 仍在本地 = settled 广播丢失，兜底清除 */
+const STALE_MS = 65_000
+
 /** 模型入参原样展示（renderer 不执行、不校验，仅格式化） */
 function formatInput(input: unknown): string {
   let text: string
@@ -42,11 +60,40 @@ function formatInput(input: unknown): string {
 
 export default function ApprovalDialog() {
   /** 待审队列：一次只展示队首，提交/结算后立刻露出下一条 */
-  const [queue, setQueue] = useState<AgentApprovalRequest[]>([])
+  const [queue, setQueue] = useState<QueueItem[]>([])
   /** 已处理 id（本地提交与 settled 可能先后到达，幂等去重） */
   const handledRef = useRef<Set<number>>(new Set())
   /** 默认焦点落在「拒绝」上（Enter = 拒绝，安全默认） */
   const denyRef = useRef<HTMLButtonElement>(null)
+
+  /** 权威对账：以 main 的 pending 为准校准本地队列（见模块头注释） */
+  const syncFromMain = useCallback(async () => {
+    const agent = window.fairy?.agent
+    if (!agent?.getPendingApprovals) return
+    try {
+      const alive = await agent.getPendingApprovals()
+      setQueue((prev) => {
+        const now = Date.now()
+        const freshAlive = alive
+          .filter((r) => !handledRef.current.has(r.id))
+          .map<QueueItem>((r) => ({
+            request: r,
+            receivedAt: prev.find((p) => p.request.id === r.id)?.receivedAt ?? now
+          }))
+        const aliveIds = new Set(freshAlive.map((i) => i.request.id))
+        // 快照竞态窗口内（<3s）刚入队的本地条目保留；其余本地孤儿 = 陈旧残留，删
+        const freshLocal = prev.filter(
+          (i) =>
+            !aliveIds.has(i.request.id) &&
+            !handledRef.current.has(i.request.id) &&
+            now - i.receivedAt < SYNC_FRESH_MS
+        )
+        return [...freshAlive, ...freshLocal]
+      })
+    } catch {
+      // preload/IPC 不可用：保持本地队列，65s 兜底过期仍在跑
+    }
+  }, [])
 
   // ===== 订阅（每窗口一个实例，退订在 cleanup；preload 未就绪时静默跳过） =====
   useEffect(() => {
@@ -54,32 +101,61 @@ export default function ApprovalDialog() {
     if (!agent?.onApproval || !agent.onApprovalSettled) return
     const offApproval = agent.onApproval((req: AgentApprovalRequest) => {
       setQueue((prev) =>
-        handledRef.current.has(req.id) || prev.some((r) => r.id === req.id) ? prev : [...prev, req]
+        handledRef.current.has(req.id) || prev.some((i) => i.request.id === req.id)
+          ? prev
+          : [...prev, { request: req, receivedAt: Date.now() }]
       )
+      // 新请求 = main 活跃信号 → 立即对账，清掉可能挡住队首的陈旧条目
+      void syncFromMain()
     })
     const offSettled = agent.onApprovalSettled((e: AgentApprovalSettledEvent) => {
       handledRef.current.add(e.id)
-      setQueue((prev) => prev.filter((r) => r.id !== e.id))
+      setQueue((prev) => prev.filter((i) => i.request.id !== e.id))
     })
+    // 挂载对账：覆盖「订阅建立前广播」的请求/结算丢失（窗口晚加载、HMR 重载）
+    void syncFromMain()
+    // 65s 兜底过期：settled 广播丢失时的最后防线（main 60s 必然结算）
+    const sweeper = setInterval(() => {
+      setQueue((prev) => {
+        const now = Date.now()
+        const alive = prev.filter((i) => now - i.receivedAt < STALE_MS)
+        return alive.length === prev.length ? prev : alive
+      })
+    }, 5_000)
     return () => {
       offApproval()
       offSettled()
+      clearInterval(sweeper)
     }
-  }, [])
+  }, [syncFromMain])
 
-  const current = queue[0]
+  const current = queue[0]?.request
 
-  /** 提交决定：先本地移除（立刻露出下一条），再回传 main；重复提交由 handledRef 挡住 */
-  const respond = useCallback((id: number, approved: boolean) => {
-    if (handledRef.current.has(id)) return
-    handledRef.current.add(id)
-    setQueue((prev) => prev.filter((r) => r.id !== id))
-    try {
-      void window.fairy.agent.respondApproval(id, approved).catch(() => {})
-    } catch {
-      // preload 面未就绪：本地已移除，main 侧超时兜底
-    }
-  }, [])
+  /**
+   * 提交决定：先本地移除（立刻露出下一条），再回传 main。
+   * main 返回 false = 该 id 已陈旧（超时/另一窗口先结算）→ 立即权威对账，
+   * 把真正活着的请求顶上来——这就是 GUI 验收「点了允许却被忽略」的自愈路径。
+   */
+  const respond = useCallback(
+    (id: number, approved: boolean) => {
+      if (handledRef.current.has(id)) return
+      handledRef.current.add(id)
+      setQueue((prev) => prev.filter((i) => i.request.id !== id))
+      try {
+        void window.fairy.agent
+          .respondApproval(id, approved)
+          .then((accepted) => {
+            if (accepted !== true) void syncFromMain()
+          })
+          .catch(() => {
+            // preload 面未就绪：本地已移除，main 侧 60s 超时兜底
+          })
+      } catch {
+        // 同上
+      }
+    },
+    [syncFromMain]
+  )
 
   // ===== Esc = 拒绝（仅对话框存在时监听，卸载即退订） =====
   useEffect(() => {

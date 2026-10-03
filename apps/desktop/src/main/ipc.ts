@@ -43,7 +43,7 @@ import {
   sendChat,
   stopChat
 } from './chat'
-import { respondApproval } from './agent-approval'
+import { getPendingApprovals, respondApproval } from './agent-approval'
 import { getEventStore } from './events'
 import { broadcast } from './windows'
 import { configureGateway, getGatewayState, onGatewayStateChanged } from './sidecar'
@@ -253,12 +253,14 @@ export function registerIpcHandlers(): void {
     return stopChat(id)
   })
 
-  // ===== 阶段 7：工具审批（IPC 边界校验 → agent-approval 结算；未知/重复 id 静默忽略） =====
+  // ===== 阶段 7：工具审批（IPC 边界校验 → agent-approval 结算；返回是否受理供 renderer 对账） =====
   ipcMain.handle(IPC.agentApprovalRespond, (_event, id: unknown, approved: unknown) => {
     if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('id 必须为有限数字')
     if (typeof approved !== 'boolean') throw new Error('approved 必须为布尔值')
-    respondApproval(id, approved)
+    return respondApproval(id, approved)
   })
+  /** 权威对账：renderer 挂载/新请求到达/提交被忽略时拉取真正 pending 的审批 */
+  ipcMain.handle(IPC.agentApprovalGetPending, () => getPendingApprovals())
 
   // ===== 阶段 4：记忆（面板 CRUD；add/update/remove/import 成功后广播 memoryChanged） =====
   ipcMain.handle(IPC.memoryList, (_event, filter?: unknown) =>

@@ -100,13 +100,23 @@ export function requestApproval(
   })
 }
 
-/** renderer 经 agent:approvalRespond 提交决定；未知/重复 id 静默忽略 */
-export function respondApproval(id: number, approved: boolean): void {
+/**
+ * renderer 经 agent:approvalRespond 提交决定。
+ * 返回 true = 已受理；false = id 陈旧/未知（超时或另一窗口已结算）——
+ * 调用方（preload/renderer）据此触发权威对账，避免陈旧点击静默丢失。
+ */
+export function respondApproval(id: number, approved: boolean): boolean {
   if (!pending.has(id)) {
     log.info('[approval]', `忽略未知/重复 id=${id} approved=${approved}`)
-    return
+    return false
   }
   settle(id, approved)
+  return true
+}
+
+/** 权威对账：当前真正未决的审批（renderer 挂载/新请求/提交被忽略时拉取） */
+export function getPendingApprovals(): AgentApprovalRequest[] {
+  return [...pending.values()].map((entry) => entry.request)
 }
 
 /** 全部未决审批结算为 false + settled{reason}（生成 finally / 退出时清悬挂） */

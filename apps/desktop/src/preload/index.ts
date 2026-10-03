@@ -89,10 +89,12 @@ contextBridge.exposeInMainWorld(
     agent: {
       onApproval: (cb: (request: AgentApprovalRequest) => void): (() => void) =>
         onEvent<AgentApprovalRequest>(IPC.agentApprovalRequest, cb),
-      respondApproval: (id: number, approved: boolean): Promise<void> =>
+      respondApproval: (id: number, approved: boolean): Promise<boolean> =>
         ipcRenderer.invoke(IPC.agentApprovalRespond, id, approved),
       onApprovalSettled: (cb: (event: AgentApprovalSettledEvent) => void): (() => void) =>
         onEvent<AgentApprovalSettledEvent>(IPC.agentApprovalSettled, cb),
+      getPendingApprovals: (): Promise<AgentApprovalRequest[]> =>
+        ipcRenderer.invoke(IPC.agentApprovalGetPending),
       onToolNotice: (cb: (notice: AgentToolNotice) => void): (() => void) =>
         onEvent<AgentToolNotice>(IPC.agentToolNotice, cb)
     },
