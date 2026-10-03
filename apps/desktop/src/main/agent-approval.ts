@@ -91,7 +91,13 @@ export function requestApproval(
   opts: { signal?: AbortSignal }
 ): Promise<boolean> {
   const id = ++seq
-  const request: AgentApprovalRequest = { id, ...req }
+  // ⚠️ id 必须放在展开**之后**，由本模块 seq 一锤定音。上游 registry 的 confirm 负载
+  // 自带 id（registry 内部 nextId 序列，每个 authorizer 从 1 重计），若写成
+  // { id, ...req } 会被它覆盖 —— GUI 验收「第二次审批框不弹」的根因（H9 第四轮破案）：
+  // 广播负载 id 恒为 1 → renderer 把后续请求当「已处理的重复 id」静默丢弃、不弹框；
+  // 重建窗经 getPending 拉回的也是负载 id=1（pending 真 key 是 seq id）→ 点「允许」
+  // 回传 1 → respondApproval 判「忽略未知/重复」。审批生命周期的权威 id = 本模块 seq。
+  const request: AgentApprovalRequest = { ...req, id }
   const signal = opts.signal
 
   return new Promise<boolean>((resolve) => {

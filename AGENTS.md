@@ -7,4 +7,4 @@
 - 蓝本（只读）：`reference/deepseek-pp/`
 - 下一步总览见 `PROJECT_STATE.md`（当前：阶段 2-5 + 通道选择全部代码完成待 GUI 验收，剩阶段 6 打包硬化）
 
-<!-- [交接] Fairy 状态=进行中 详情见 PROJECT_STATE.md（H9：阶段 7 GUI 验收第 4 轮复测待执行） -->
+<!-- [交接] Fairy 状态=进行中 详情见 PROJECT_STATE.md（H9：审批框「第二次不弹」根因已修复=审批 id 覆盖，第 5 轮复测待执行） -->

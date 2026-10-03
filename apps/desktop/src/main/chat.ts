@@ -373,7 +373,10 @@ async function runGeneration(
         const registry = getToolRegistry()
         tools = registry.list().map((r) => r.tool)
         authorize = createRegistryAuthorizer(registry, {
-          confirm: (req) => requestApproval(req, { signal })
+          // registry 的 confirm 负载自带 id（registry 内部 nextId 序列，每轮生成从 1
+          // 重计，与审批生命周期无关）。显式剥离后再交 requestApproval——审批 id 由
+          // agent-approval 的 seq 统一生成（曾因两者相撞导致第二次审批框不弹，H9 破案）
+          confirm: ({ id: _registryRequestId, ...req }) => requestApproval(req, { signal })
         })
       }
     }

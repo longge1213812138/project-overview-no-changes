@@ -1,6 +1,6 @@
 # Fairy 项目交接材料
 
-> 交接编号：**H9**（H8 同对话前序快照）｜ 状态：**阶段 7 代码完成+自动化验收全绿；GUI 验收进行中——审批框缺陷已三轮修复，第 4 轮待用户复测；MVP GUI/干净虚拟机验收待做** ｜ 更新时间：2026-10-03
+> 交接编号：**H9**（H8 同对话前序快照）｜ 状态：**阶段 7 代码完成+自动化验收全绿；GUI 验收进行中——「第二次审批框不弹」根因已破案并修复（审批 id 被 registry 负载 id 覆盖，修复④⑤+回归测试），第 5 轮复测待用户执行；MVP GUI/干净虚拟机验收待做** ｜ 更新时间：2026-10-04
 > 工作目录（绝对路径）：`C:\Users\91533\Desktop\Fairy`
 > **本次开发实际工作目录**：`C:\Users\91533\Desktop\Fairy.worktrees\project-overview-no-changes`（git worktree，main 分支）
 
@@ -9,7 +9,7 @@
 - **目标**：Fairy = Windows 桌面私人助手，以 **DeepSeek 网页版**（chat.deepseek.com 会话）为 LLM 后端，零 API 成本。MVP 范围 F1–F7 见 `docs/DEV_PLAN.md` §1。
 - **范围（MVP）**：聊天（流式）、多会话、"帮我记东西"、日程+托盘通知、FTS5 长期记忆、托盘/Alt+Space 浮窗/开机自启、登录引导流。
 - **MVP 后续范围（用户决定，2026-10-03）**：阶段 7–9：工具循环/Agent/本地 Shell、Skill、MCP、cron 定时引擎；**不做云同步和多用户**，产品保持本地单用户。
-- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/能力探测/审批 IPC/受控 Shell 代码完成并通过真实 API 端到端验收；**GUI 人工验收进行中：审批框可见性缺陷已三轮修复（cf88e41/2dfdf7f/41948d7），第 4 轮复测待用户执行**。
+- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/能力探测/审批 IPC/受控 Shell 代码完成并通过真实 API 端到端验收；**GUI 人工验收进行中：「第二次审批框不弹」缺陷经四轮修复（cf88e41/2dfdf7f/41948d7/50f9a22）复测仍失败后，快照诊断破案 = 审批 id 被 registry 负载 id 覆盖，根因修复已落（修复⑤+回归测试），第 5 轮复测待用户执行**。
 - **git 位置**：历史（当前唯一提交 = 根提交 `b001520 "MVP"`，81 文件）：
   - `bf06919` 阶段 0：pnpm workspace + Electron 骨架 + 图标 + NSIS 打包通过
   - `b9932fe` docs：附录 C 本机环境备忘
@@ -76,7 +76,7 @@
 | 阶段 5 日程 | ✅ **代码完成（2026-09-27），待 GUI 验收** | 迁移 v3（events+索引，真实库 v2→v3 烟测）；意图 schedule_add/done/cancel/query（add 非法时间追问一次、不写脏数据）；notify-loop 30s 轮询→通知→点通知开日程 tab、启动 sweep 已过期不补弹、退出前未触发提示；CalendarPanel（今天/明天/全部/勾选/手动增删/徽章）；测试 137/137 绿 |
 | 通道选择（§5.6，插入需求） | ✅ **完成（2026-09-27），待 GUI 验收** | 启动零登录烟测通过（12s 零 ds-free-api 进程/零端口）；channel=null 选择卡、API 表单（baseUrl/key/model）、网页通道需手点「启动网关」才登录、切 API 自动停网关、过期指纹按通道门控（仅 web 上报托盘红） |
 | 阶段 6 打包硬化 | ✅ **代码完成（2026-10-02），本机烟测通过，待干净虚拟机验收** | `electron-builder.yml`（NSIS+portable、extraResources 带网关二进制/双图标）+ `resources/installer.nsh`（安装选项页「开机自启」默认勾选，`/S` 也默认开；卸载清理 Run 键）+ `scripts/stage-extras.mjs`；凭据 DPAPI：`main/secrets.ts` + `config.ts` 重写（明文自动迁移、config.json 只剩非敏感字段）；日志 `main/logger.ts`（electron-log 按天滚动留 7 天 + 崩溃/子进程留痕）+ 诊断导出 `main/diagnostics.ts`（脱敏报告）+ 设置页「应用」区（自启开关/导出诊断/日志目录）+ `main/autostart.ts`。烟测：打包出 `Fairy Setup 0.0.1.exe`（112MB）+ `Fairy-0.0.1-portable.exe`（112MB）；静默安装→Run 键 `com.fairy.assistant` 写入→实机启动日志 `[autostart] openAtLogin=true`→静默卸载键/目录/卸载项全清；旧明文 config 自动迁移到 `secrets.dpapi.json`（protected:true，打包/开发两种上下文解密均成功），`config.json` 已无任何凭据；137 测试绿 + typecheck 绿 |
-| 阶段 7 Agent 工具运行时 | ✅ **代码完成（2026-10-03），待 GUI 人工验收** | core：`agent/runtime`（有界循环+授权决策 allowOutside/reason 穿透）、`agent/registry`（ToolRegistry + createRegistryAuthorizer，风险/审批/assess 策略，默认拒绝）、`agent/capability`（probeToolsSupport 两段探测三态）、`agent/tools`（pathguard 真实路径边界 + workspace_files + get_current_time + 受控 shell：白名单9命令/危险名单先查/spawn 无 shell/最小 env/输出截断）。main：`agent-approval.ts`（广播审批+60s超时拒绝+停止取消+全日志）、`agent-tools.ts`（workspace=%APPDATA%/fairy/workspace + 注册表装配 + 探测缓存）、chat 接线（通道门控+capabilityHint+toolNotice 广播）、浮窗 Esc 豁免。renderer：`ApprovalDialog`（队列/默认拒绝/Esc拒绝/越界红条）+ ChatPane 状态行/hint 灰条（落 meta 重开仍在）。证据：**227 单测 + 4 E2E 全绿、全仓 typecheck 绿、build 绿、bundle 实测无 OS 执行器、真实 agnes API 探测=supported(required)**。Shell 边界=白名单+路径边界+进程管控（**非 OS 级沙箱**，本机无原生依赖；DEV_PLAN 阶段 7 实施备注已如实声明）。**提交链**：`200da53`主体 → `cf88e41`/`2dfdf7f`/`41948d7` 审批框 GUI 缺陷三轮修复（详见 §5 ③ 进展实录）。 |
+| 阶段 7 Agent 工具运行时 | ✅ **代码完成（2026-10-03），待 GUI 人工验收** | core：`agent/runtime`（有界循环+授权决策 allowOutside/reason 穿透）、`agent/registry`（ToolRegistry + createRegistryAuthorizer，风险/审批/assess 策略，默认拒绝）、`agent/capability`（probeToolsSupport 两段探测三态）、`agent/tools`（pathguard 真实路径边界 + workspace_files + get_current_time + 受控 shell：白名单9命令/危险名单先查/spawn 无 shell/最小 env/输出截断）。main：`agent-approval.ts`（广播审批+60s超时拒绝+停止取消+全日志）、`agent-tools.ts`（workspace=%APPDATA%/fairy/workspace + 注册表装配 + 探测缓存）、chat 接线（通道门控+capabilityHint+toolNotice 广播）、浮窗 Esc 豁免。renderer：`ApprovalDialog`（队列/默认拒绝/Esc拒绝/越界红条）+ ChatPane 状态行/hint 灰条（落 meta 重开仍在）。证据：**227 单测 + 4 E2E 全绿、全仓 typecheck 绿、build 绿、bundle 实测无 OS 执行器、真实 agnes API 探测=supported(required)**。Shell 边界=白名单+路径边界+进程管控（**非 OS 级沙箱**，本机无原生依赖；DEV_PLAN 阶段 7 实施备注已如实声明）。**提交链**：`200da53`主体 → `cf88e41`/`2dfdf7f`/`41948d7`/`50f9a22` 审批框 GUI 缺陷四轮修复 → 修复⑤ 根因（审批 id 主权）+ 回归测试 3 项（详见 §5 ③ 进展实录）。 |
 
 代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/SettingsTab + ApprovalDialog + 底部 tab。**尚未做**：阶段 7 GUI 人工验收（清单见 §5 ③）、MVP GUI 验收、干净虚拟机验收。
 
@@ -84,7 +84,7 @@
 
 ## 5. 接续动作
 
-**当前并行事项**：① **【阻塞在用户侧】阶段 7 GUI 复测**：审批框第 4 轮修复（41948d7）待重启 pnpm dev 实测，若仍异常 → 读日志 `[approval] ... snapshot=` 快照行破案；② MVP GUI/干净虚拟机验收（web 项等 10-11 解禁）：
+**当前并行事项**：① **【阻塞在用户侧】阶段 7 GUI 复测**：第 4 轮复测已执行=仍失败（2026-10-04 日志），但 `respond ... snapshot=` 快照诊断已破案——根因=审批 id 被 registry 负载 id 覆盖（详见 §5 ③）；根因修复（修复⑤）+回归测试已落，**第 5 轮复测待用户执行**：重启 `pnpm dev` → 连测两次 get_current_time/whoami → 第二次应自动弹框到前台、日志 respond id 与请求 id 一致；② MVP GUI/干净虚拟机验收（web 项等 10-11 解禁）：
 
 **① GUI 验收清单（阶段 2/3/4/5 + 通道选择合并，DEV_PLAN §6 各阶段验收 + §9 M2/M3）**：
 1. `pnpm dev`（新终端，Node 24，`ELECTRON_RUN_AS_NODE` 未被继承）。
@@ -123,15 +123,17 @@
 
 **③ 阶段 7 GUI 人工验收清单（2026-10-03；真实 API E2E 4/4 已自动通过）**
 
-**验收进展实录（日志证据在 `%APPDATA%/fairy/logs/fairy-2026-10-03.log`）**：
-- ✅ 已测通过：第 2 项首次弹框+允许（18:43/18:51/19:07/19:30 多轮 `approved=true`）、第 3 项拒绝（18:43 `approved=false`）、Esc/停止路径（18:44 `cancelled`）、60s 超时（18:45 等多轮 `timeout`）
-- ❌ **阻塞缺陷（测试中断点）**：「重启后第二次审批框不自动弹出，需点托盘/关窗重开才出现」——已三轮修复：
-  - `cf88e41` 审批队列权威对账（respond 返回受理态 + getPending + 三时机对账）
-  - `2dfdf7f` summonForApproval 主动召唤窗口 + 浮窗失焦豁免 + 10s 定时对账 + 窗口维度日志
-  - `41948d7` 焦点即自愈（focus/visibilitychange→对账）+ 双保险事件（syncReq）+ respond 队列快照诊断
-  - **待第 4 轮复测**：重启 pnpm dev → 连测两次 get_current_time/whoami → 第二次应自动弹到前台
-- ❓ **未定位谜团（快照诊断待复现）**：19:31:46 重建窗（wc3）respond 提交 id=1，而 pending 只有 id=2——renderer 本地队列从何持有 id=1 静态无法解释；下轮复现看 `respond ... snapshot={queueIds,handledIds,from}` 一击定位
-- 🚫 **已确认无效路线（勿回退）**：纯事件驱动的队列同步（仅 onApproval/onSettled 单保险）经 18:43-19:31 共四轮实测失效；现架构 = 五时机对账（挂载/新请求/提交被拒/10s 定时/焦点变化）+ 双保险广播事件，后续改动不得删减任一时机
+**验收进展实录（日志：`%APPDATA%/fairy/logs/fairy-2026-10-03.log` 与 `fairy-2026-10-04.log`）**：
+- ✅ 已测通过：第 2 项首次弹框+允许（18:43/18:51/19:07/19:30 及 10-04 01:01/01:03/01:19 多轮 `approved=true`）、第 3 项拒绝（18:43 `approved=false`）、Esc/停止路径（18:44 `cancelled`）、60s 超时（18:45 等多轮 `timeout`）、**第 6 项白名单拒绝（10-04 01:12 `denied reason=该命令被安全策略禁止`，powershell 未进审批即拒）**
+- ❌→✅ **「第二次审批框不弹」已破案（第 4 轮复测 2026-10-04，快照诊断命中）**：
+  - 复测复现三次（01:01/01:05/01:21）：首次审批框正常（`wc1` respond 受理），第二次起只显示 🔧 状态行「等待审批」、审批框不弹，60s 后 `reason=timeout`；关窗重开后弹出的框点「允许」→ `respond id=1 ... snapshot={"queueIds":[1],"handledIds":[1],"from":"main"}` 被记 `忽略未知/重复 id=1`。
+  - **根因（日志+静态双向确证）**：`requestApproval` 用 `{ id, ...req }` 组装广播负载，而 registry 的 confirm 负载自带 `id`（registry 内部 nextId，每轮生成=每个 authorizer 从 1 重计）→ **registry id 把 agent-approval 的 seq id 覆盖**：
+    - 广播负载 id 恒为 1 → renderer `handledRef` 把后续请求当「已处理的重复 id」**静默丢弃** → 不弹框（🔧 状态行走 toolNotice 另一通道，照常显示「等待审批」）；
+    - 重建窗挂载对账 `getPending` 返回负载 id=1（pending 真 key 是 seq id=2/3）→ 弹「id=1」的框 → 点「允许」回传 1 → `respondApproval` 判未知忽略。
+  - **谜团破**：重建窗 renderer 队列里的 id=1 = `getPending` 返回的**负载 id**（不是历史广播残留）；`handledIds:[]`→`[1]` 证明该 renderer 是全新实例（点击前未处理过任何 id）。19:31 与 10-04 两次快照完全一致。
+  - **修复链**：`cf88e41`（权威对账）→ `2dfdf7f`（召唤+定时对账）→ `41948d7`（焦点自愈+双保险事件）→ `50f9a22`（修复④：延迟 500ms 三保险 syncReq + summon moveTop 置顶 + 快照诊断）→ **修复⑤（根因，2026-10-04 提交）**：`agent-approval.ts` 改 `{ ...req, id }`（seq id 一锤定音）+ `chat.ts` confirm 接线显式剥离 registry id + **回归测试 3 项**（apps/desktop 新增 vitest 测试基建：id 主权/重复 respond 幂等/60s 收敛；变异验证=回退旧写法即红 2 例，咬住的正是生产症状）。
+  - **待第 5 轮复测**：重启 pnpm dev → 连测两次 get_current_time/whoami → 第二次应自动弹到前台；预期日志 respond id 与请求 id 一致、「忽略未知/重复」不再出现。
+- 🚫 **已确认无效路线（勿回退）**：纯事件驱动的队列同步（仅 onApproval/onSettled 单保险）经 18:43-19:31 共四轮实测失效；现架构 = 五时机对账（挂载/新请求/提交被拒/3s 定时（修复④由 10s 降频）/焦点变化）+ 双保险广播事件，后续改动不得删减任一时机。**新增不变量**：审批 id 必须由 agent-approval 的 seq 生成，任何上游负载携带的 id 一律不得进入广播负载（renderer 按 id 去重依赖此不变量，回归测试钉死）。
 
 **清单（未测项）**：
 1. `pnpm dev`（新终端，Node 24）；设置页确认 API 通道（agnes 配置已有）。
@@ -139,7 +141,7 @@
 3. 同样请求再触发一次 → 点「拒绝」或按 **Esc** → 模型收到拒绝原因、不执行（回复中可见）。
 4. 审批弹出后放 60 秒不理 → 对话框自行关闭（超时拒绝），`logs` 里 `[approval] ... reason=timeout`。
 5. 「用 shell 运行 whoami」→ 审批（红「执行」徽标）→ 允许 → 输出用户名；「用 shell 读 ..\..\ 下某文件」→ 审批对话框出现**越界红条警告**（reason 显示具体路径）。
-6. 拒绝类（白名单）：「用 shell 运行 powershell Get-Date」→ 即便模型调用也 `denied`（日志 reason=白名单外/安全策略禁止），回复可见拒绝。
+6. ~~拒绝类（白名单）~~（✅ 已测通过 10-04 01:12）：「用 shell 运行 powershell Get-Date」→ 即便模型调用也 `denied`（日志 reason=该命令被安全策略禁止），回复可见拒绝。
 7. web 通道：切到网页通道发任意消息 → 气泡下灰条「当前为 DeepSeek 网页通道，工具调用仅支持 API 通道…」（重开会话灰条仍在，已落 meta）。
 8. 浮窗（Alt+Space）触发审批 → 对话框出现，且**有 pending 时 Esc 不收窗**（Esc=拒绝）；失焦收窗仍正常。
 9. 主窗与浮窗同时收到审批 → 任一窗口响应后另一窗对话框自动关闭（settled）。
@@ -151,6 +153,6 @@
 
 - 编号：**H9**（H1-H8 已完成归档；H8=同对话前序快照）
 - 源对话：本机 Pi 会话（阶段 7 实现+GUI 验收缺陷修复全程）
-- 状态：**材料已核对、等待用户复测**。阶段 7 代码完成（4 提交至 `41948d7`，worktree main 分支，**代码无未提交改动**；仅本交接文档 PROJECT_STATE/AGENTS.md 自身未提交，随下次提交带上即可）；227 单测 + typecheck + build + 真实 agnes API E2E 4/4 全绿；GUI 验收进行中，审批框「第二次不弹」缺陷三轮修复后**第 4 轮复测待用户执行**（若失败→日志 snapshot 快照破案）。MVP GUI/干净虚拟机验收待做（web 账号禁言至 2026-10-11）；tag `m1`/`m2`/`m3` 打在 `b001520`；阶段 7 对应 M5，验收过后打 `m5`。
+- 状态：**材料已核对、等待用户第 5 轮复测**。阶段 7 代码完成（6 提交：主体 `200da53` → 审批框修复 `cf88e41`/`2dfdf7f`/`41948d7`/`50f9a22`（修复④：延迟对账+置顶+快照诊断）→ 修复⑤（根因 id 主权+回归测试+文档，本笔）；worktree main 分支，**全部已提交**）；**227+3 单测**（core 227 + desktop 新增 3）+ typecheck + build 全绿 + 真实 agnes API E2E 4/4；GUI 验收进行中，「第二次不弹」根因=审批 id 被 registry 负载 id 覆盖，已修复（详见 §5 ③）；**第 5 轮复测待用户执行**。（修正 H9 前快照陈述「代码无未提交改动」：修复④ 三文件当时已暂存未提交，随 `50f9a22` 提交。）MVP GUI/干净虚拟机验收待做（web 账号禁言至 2026-10-11）；tag `m1`/`m2`/`m3` 打在 `b001520`；阶段 7 对应 M5，验收过后打 `m5`。
 - 用户已确认接续范围：阶段 7 全量实现+Shell+验收（含 GUI 缺陷持续修复）；工具调用仅 API 通道；web 通道不做 tools。
-- **接续第一步**：读日志尾部 `[approval]` 段（`%APPDATA%/fairy/logs/fairy-2026-10-03.log`）确认第 4 轮复测结果：全部 `approved=true` 正常弹出 → 回归 §5 ③ 未测项（5 越界/6 白名单拒绝/7 web提示/8 浮窗/9 双窗/10 停止）；若仍有 `忽略未知/重复` → 看 `snapshot=` 行定位 renderer 队列真相后修。
+- **接续第一步**：等用户第 5 轮复测（重启 `pnpm dev` → 连测两次 get_current_time/whoami，第二次应自动弹框）。通过 → 回归 §5 ③ 未测项（5 越界红条/7 web 提示/8 浮窗/9 双窗/10 停止；6 已过）；若仍异常 → 读 `%APPDATA%/fairy/logs/fairy-2026-10-*.log` 尾部 `[approval]` 段与 `respond ... snapshot=` 行定位（快照诊断已证可一击破案）。
