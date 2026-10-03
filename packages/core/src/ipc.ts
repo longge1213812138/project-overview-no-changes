@@ -86,10 +86,17 @@ export interface FairyApi {
     /**
      * 提交审批决定。返回 true = main 已受理；false = id 陈旧/未知（已被超时/
      * 另一窗口结算），调用方应以 getPendingApprovals 对账而非信任本地队列。
+     * snapshot 为诊断快照（可选，随 respond 落 main 日志）。
      */
-    respondApproval(id: number, approved: boolean): Promise<boolean>;
+    respondApproval(
+      id: number,
+      approved: boolean,
+      snapshot?: AgentApprovalSnapshot
+    ): Promise<boolean>;
     /** 订阅审批已结算（本窗口对话框应关闭） */
     onApprovalSettled(cb: (event: AgentApprovalSettledEvent) => void): () => void;
+    /** 订阅对账指令（main summon 后补发；收到立即 getPending 校准） */
+    onSyncRequest(cb: () => void): () => void;
     /** 权威对账：当前真正 pending 的审批列表（挂载/新请求/提交被忽略时拉取） */
     getPendingApprovals(): Promise<AgentApprovalRequest[]>;
     /** 工具执行状态（可观测；日志真源在 main） */
@@ -208,6 +215,19 @@ export interface AgentApprovalSettledEvent {
   reason?: string;
 }
 
+/**
+ * renderer 审批队列快照（诊断用）：respond 时随请求带给 main 落日志，
+ * 用于排查「点击提交的 id 与队列不符/框未渲染」类 GUI 缺陷。
+ */
+export interface AgentApprovalSnapshot {
+  /** 当前本地队列（展示顺序） */
+  queueIds: number[];
+  /** 已处理 id 集合 */
+  handledIds: number[];
+  /** 快照采集时的窗口标识（renderer 自报，如 'main'/'float'） */
+  from?: string;
+}
+
 /** IPC 通道名（main 注册 / preload 转发，集中在此防拼写漂移） */
 export const IPC = {
   sessionList: 'session:list',
@@ -253,6 +273,8 @@ export const IPC = {
   agentApprovalRespond: 'agent:approvalRespond',
   /** renderer → main：拉取当前 pending 审批（权威对账） */
   agentApprovalGetPending: 'agent:approvalGetPending',
+  /** main → renderer：对账指令（summon 后补发，renderer 收到立即 getPending 校准） */
+  agentApprovalSyncReq: 'agent:approvalSyncReq',
   /** main → renderer：工具执行状态（requested/denied/started/completed/failed） */
   agentToolNotice: 'agent:toolNotice'
 } as const;

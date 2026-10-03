@@ -3,6 +3,7 @@ import { APP_NAME, FAIRY_VERSION, IPC } from '@fairy/core'
 import type {
   AgentApprovalRequest,
   AgentApprovalSettledEvent,
+  AgentApprovalSnapshot,
   AgentToolNotice,
   ApiChannelConfig,
   ChannelActionResult,
@@ -89,10 +90,11 @@ contextBridge.exposeInMainWorld(
     agent: {
       onApproval: (cb: (request: AgentApprovalRequest) => void): (() => void) =>
         onEvent<AgentApprovalRequest>(IPC.agentApprovalRequest, cb),
-      respondApproval: (id: number, approved: boolean): Promise<boolean> =>
-        ipcRenderer.invoke(IPC.agentApprovalRespond, id, approved),
+      respondApproval: (id: number, approved: boolean, snapshot?: AgentApprovalSnapshot): Promise<boolean> =>
+        ipcRenderer.invoke(IPC.agentApprovalRespond, id, approved, snapshot),
       onApprovalSettled: (cb: (event: AgentApprovalSettledEvent) => void): (() => void) =>
         onEvent<AgentApprovalSettledEvent>(IPC.agentApprovalSettled, cb),
+      onSyncRequest: (cb: () => void): (() => void) => onEvent<void>(IPC.agentApprovalSyncReq, cb),
       getPendingApprovals: (): Promise<AgentApprovalRequest[]> =>
         ipcRenderer.invoke(IPC.agentApprovalGetPending),
       onToolNotice: (cb: (notice: AgentToolNotice) => void): (() => void) =>

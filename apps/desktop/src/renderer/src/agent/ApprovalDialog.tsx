@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AgentApprovalRequest, AgentApprovalSettledEvent } from '@fairy/core'
+import type {
+  AgentApprovalRequest,
+  AgentApprovalSettledEvent,
+  AgentApprovalSnapshot
+} from '@fairy/core'
 
 /**
  * 阶段 7：工具审批对话框（主窗与浮窗各挂一个实例，见 App.tsx；每窗口只订阅一次）。
@@ -61,6 +65,9 @@ function formatInput(input: unknown): string {
 export default function ApprovalDialog() {
   /** 待审队列：一次只展示队首，提交/结算后立刻露出下一条 */
   const [queue, setQueue] = useState<QueueItem[]>([])
+  /** 快照镜像：respond 回调（useCallback）读最新队列，避免闭包陈旧 */
+  const queueRef = useRef<QueueItem[]>([])
+  queueRef.current = queue
   /** 已处理 id（本地提交与 settled 可能先后到达，幂等去重） */
   const handledRef = useRef<Set<number>>(new Set())
   /** 默认焦点落在「拒绝」上（Enter = 拒绝，安全默认） */
@@ -112,6 +119,8 @@ export default function ApprovalDialog() {
       handledRef.current.add(e.id)
       setQueue((prev) => prev.filter((i) => i.request.id !== e.id))
     })
+    // 对账指令：main summon 后的双保险事件（request 可能单条丢失，任一到达即可校准）
+    const offSyncReq = agent.onSyncRequest?.(() => void syncFromMain())
     // 挂载对账：覆盖「订阅建立前广播」的请求/结算丢失（窗口晚加载、HMR 重载）
     void syncFromMain()
     // 65s 兜底过期：settled 广播丢失时的最后防线（main 60s 必然结算）
@@ -125,11 +134,23 @@ export default function ApprovalDialog() {
     // 10s 定时对账兕底：任何事件丢失/IPC reject 被吞的路径，最迟 10s 自愈
     //（GUI 验收实测：单靠事件触发的对账在某些窗口上未执行，陈旧框长期驻留）
     const reconciler = setInterval(() => void syncFromMain(), 10_000)
+    // 窗口被召唤到前台/重新可见时立即对账：summonForApproval 会 focus 本窗口，
+    // 把「窗口到前台」与「渲染自愈」焊在一起——即便广播/定时器全部失效，
+    // 只要窗口获得焦点就必拉回权威队列（GUI 验收实测的最后防线）
+    const onWindowFocus = (): void => void syncFromMain()
+    const onVisibilityChange = (): void => {
+      if (!document.hidden) void syncFromMain()
+    }
+    window.addEventListener('focus', onWindowFocus)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       offApproval()
       offSettled()
+      offSyncReq?.()
       clearInterval(sweeper)
       clearInterval(reconciler)
+      window.removeEventListener('focus', onWindowFocus)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [syncFromMain])
 
@@ -146,8 +167,13 @@ export default function ApprovalDialog() {
       handledRef.current.add(id)
       setQueue((prev) => prev.filter((i) => i.request.id !== id))
       try {
+        const snapshot: AgentApprovalSnapshot = {
+          queueIds: queueRef.current.map((i) => i.request.id),
+          handledIds: [...handledRef.current],
+          from: window.location.search.includes('float=1') ? 'float' : 'main'
+        }
         void window.fairy.agent
-          .respondApproval(id, approved)
+          .respondApproval(id, approved, snapshot)
           .then((accepted) => {
             if (accepted !== true) void syncFromMain()
           })

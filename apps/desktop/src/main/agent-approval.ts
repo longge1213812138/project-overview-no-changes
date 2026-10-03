@@ -118,6 +118,9 @@ export function requestApproval(
     summonForApproval()
     signal?.addEventListener('abort', onAbort, { once: true })
     broadcast(IPC.agentApprovalRequest, request)
+    // 双保险：紧跟着发一条独立的对账指令。两条事件任一到达 renderer 都会
+    // 拿到权威队列（request 负责入队展示、syncReq 负责校准），单条丢失自愈
+    broadcast(IPC.agentApprovalSyncReq)
   })
 }
 

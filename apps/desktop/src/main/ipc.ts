@@ -256,19 +256,30 @@ export function registerIpcHandlers(): void {
   })
 
   // ===== 阶段 7：工具审批（IPC 边界校验 → agent-approval 结算；返回是否受理供 renderer 对账） =====
-  ipcMain.handle(IPC.agentApprovalRespond, (event, id: unknown, approved: unknown) => {
-    if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('id 必须为有限数字')
-    if (typeof approved !== 'boolean') throw new Error('approved 必须为布尔值')
-    // 诊断：记录提交来自哪个窗口（GUI 验收排查陈旧点击/多窗不一致的关键线索）
-    const owner = BrowserWindow.fromWebContents(event.sender)
-    const from =
-      owner === getMainWindow() ? 'main' : owner === getFloatWindow() ? 'float' : owner ? 'other' : 'gone'
-    log.info(
-      '[approval]',
-      `respond id=${id} approved=${approved} from=${from}(wc${event.sender.id})`
-    )
-    return respondApproval(id, approved)
-  })
+  ipcMain.handle(
+    IPC.agentApprovalRespond,
+    (event, id: unknown, approved: unknown, snapshot?: unknown) => {
+      if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('id 必须为有限数字')
+      if (typeof approved !== 'boolean') throw new Error('approved 必须为布尔值')
+      // 诊断：记录提交来自哪个窗口 + 提交时 renderer 本地队列快照
+      // （GUI 验收排查：点击 id 与 pending 不符 / 框未渲染 的关键证据）
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const from =
+        owner === getMainWindow()
+          ? 'main'
+          : owner === getFloatWindow()
+            ? 'float'
+            : owner
+              ? 'other'
+              : 'gone'
+      log.info(
+        '[approval]',
+        `respond id=${id} approved=${approved} from=${from}(wc${event.sender.id})` +
+          `${snapshot !== undefined ? ` snapshot=${JSON.stringify(snapshot)}` : ''}`
+      )
+      return respondApproval(id, approved)
+    }
+  )
   /** 权威对账：renderer 挂载/新请求到达/提交被忽略时拉取真正 pending 的审批 */
   ipcMain.handle(IPC.agentApprovalGetPending, () => getPendingApprovals())
 
