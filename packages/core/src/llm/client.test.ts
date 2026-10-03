@@ -7,6 +7,7 @@ import { LlmAuthError, LlmError, SessionExpiredError } from './errors';
 let server: http.Server;
 let port = 0;
 let requestCount = 0;
+let requestBody: Record<string, unknown> | undefined;
 let handler: (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -27,6 +28,7 @@ function client(over: Partial<Parameters<typeof createLlmClient>[0]> = {}) {
 
 beforeEach(() => {
   requestCount = 0;
+  requestBody = undefined;
   handler = (_req, res) => json(res, 500, { error: 'unset handler' });
 });
 
@@ -108,6 +110,66 @@ describe('chatOnce', () => {
     const p = client().chatOnce([{ role: 'user', content: 'x' }], { signal: ctrl.signal });
     await expect(p).rejects.toMatchObject({ name: 'AbortError' });
   });
+
+  it('发送工具定义/工具结果并解析非流式 tool_calls', async () => {
+    handler = (req, res) => {
+      let raw = '';
+      req.on('data', (chunk: Buffer) => {
+        raw += chunk.toString();
+      });
+      req.on('end', () => {
+        requestBody = JSON.parse(raw) as Record<string, unknown>;
+        json(res, 200, {
+          choices: [
+            {
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call-1',
+                    type: 'function',
+                    function: { name: 'echo', arguments: '{"value":"hi"}' }
+                  }
+                ]
+              },
+              finish_reason: 'tool_calls'
+            }
+          ]
+        });
+      });
+    };
+    const toolCall = {
+      id: 'call-1',
+      type: 'function' as const,
+      function: { name: 'echo', arguments: '{"value":"hi"}' }
+    };
+    const r = await client().chatOnce(
+      [
+        { role: 'assistant', content: '', toolCalls: [toolCall] },
+        { role: 'tool', toolCallId: 'call-1', name: 'echo', content: '{"echoed":"hi"}' }
+      ],
+      {
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'echo', parameters: { type: 'object' } }
+          }
+        ],
+        toolChoice: 'auto'
+      }
+    );
+
+    expect(r.content).toBe('');
+    expect(r.toolCalls).toEqual([toolCall]);
+    expect(requestBody).toMatchObject({
+      tool_choice: 'auto',
+      tools: [{ type: 'function', function: { name: 'echo' } }],
+      messages: [
+        { role: 'assistant', tool_calls: [toolCall] },
+        { role: 'tool', tool_call_id: 'call-1', name: 'echo' }
+      ]
+    });
+  });
 });
 
 describe('streamChat', () => {
@@ -183,6 +245,36 @@ describe('streamChat', () => {
     };
     const c = client({ idleTimeoutMs: 100 });
     await expect(c.streamChat([{ role: 'user', content: 'x' }])).rejects.toBeInstanceOf(LlmError);
+  });
+
+  it('累积跨 chunk 的流式工具调用', async () => {
+    handler = (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"echo","arguments":"{\\"value\\":"}}]}}]}\n\n'
+      );
+      res.write(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"hi\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
+      );
+      res.end();
+    };
+    const r = await client().streamChat([{ role: 'user', content: 'x' }], undefined, {
+      tools: [
+        {
+          type: 'function',
+          function: { name: 'echo', parameters: { type: 'object' } }
+        }
+      ]
+    });
+
+    expect(r.finishReason).toBe('tool_calls');
+    expect(r.toolCalls).toEqual([
+      {
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'echo', arguments: '{"value":"hi"}' }
+      }
+    ]);
   });
 
   it('流式中途中止 → AbortError', async () => {

@@ -3,7 +3,13 @@ import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import type { ChatBusyEvent, ChatDeltaEvent, ChatDoneEvent, MessageDto } from '@fairy/core'
+import type {
+  AgentToolNotice,
+  ChatBusyEvent,
+  ChatDeltaEvent,
+  ChatDoneEvent,
+  MessageDto
+} from '@fairy/core'
 import 'highlight.js/styles/github-dark.css'
 
 /**
@@ -32,6 +38,8 @@ interface LocalMessage {
   reasoning: string
   error: string | null
   streaming: boolean
+  /** 阶段 7：能力提示（ChatDoneEvent.capabilityHint，气泡下方小灰条） */
+  hint: string
 }
 
 const EXAMPLE_PROMPTS = [
@@ -39,6 +47,23 @@ const EXAMPLE_PROMPTS = [
   '帮我写一封明天上午请假半天的邮件',
   '今晚吃什么？给三个 20 分钟能做完的家常菜'
 ]
+
+/** 工具状态 → 中文短文案（工具状态行用，见 toolNoticeText） */
+const TOOL_STATUS_TEXT: Record<AgentToolNotice['status'], string> = {
+  requested: '等待审批…',
+  denied: '已拒绝',
+  started: '执行中…',
+  completed: '已完成',
+  failed: '执行失败'
+}
+
+/** 状态行文本：🔧 工具名：状态（failed 附错误摘要，超长截断防撑破输入区） */
+function toolNoticeText(n: AgentToolNotice): string {
+  const base = `🔧 ${n.name}：${TOOL_STATUS_TEXT[n.status]}`
+  if (n.status !== 'failed' || !n.error) return base
+  const err = n.error.length > 60 ? `${n.error.slice(0, 60)}…` : n.error
+  return `${base}（${err}）`
+}
 
 /** meta（JSON 对象）容错取字符串 */
 function metaString(meta: MessageDto['meta'], key: string): string {
@@ -68,7 +93,8 @@ function appendDelta(
           content: kind === 'content' ? text : '',
           reasoning: kind === 'reasoning' ? text : '',
           error: null,
-          streaming: true
+          streaming: true,
+          hint: ''
         }
       ]
     }
@@ -101,6 +127,8 @@ function finalizeMessage(list: LocalMessage[], e: ChatDoneEvent): LocalMessage[]
   const msg: LocalMessage = { ...next[idx] }
   if (msg.dbId === null) msg.dbId = e.messageId
   msg.streaming = false
+  // 阶段 7：通道能力提示随 done 落到条目上（非空才展示）
+  if (e.capabilityHint) msg.hint = e.capabilityHint
   if (!e.ok && e.error) msg.error = e.error
   next[idx] = msg
   return next
@@ -112,12 +140,17 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
   const [input, setInput] = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
   const [busySessionId, setBusySessionId] = useState<string | null>(null)
+  /** 最近一条工具执行状态行（只在 busy 期间展示，见 onToolNotice 订阅） */
+  const [toolStatus, setToolStatus] = useState<string | null>(null)
 
   const busy = busySessionId === sessionId
 
   // 事件订阅只挂一次，靠 ref 过滤当前会话（浮窗 quick 会话 vs 普通会话互不串扰）
   const sessionRef = useRef(sessionId)
   sessionRef.current = sessionId
+  /** busy 快照：工具状态回调里同步判断（不用闭包里的旧 busy） */
+  const busyRef = useRef(false)
+  busyRef.current = busy
   /** 乐观条目 React key 计数（负数区，避开落库 id 正数区） */
   const keyRef = useRef(0)
 
@@ -142,6 +175,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             role: row.role,
             content: row.content,
             reasoning: metaString(row.meta, 'reasoning'),
+            hint: metaString(row.meta, 'capabilityHint'),
             error: metaString(row.meta, 'error') || null,
             streaming: false
           }))
@@ -168,12 +202,28 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
       setMessages((prev) => finalizeMessage(prev, e))
     })
     const offBusy = window.fairy.chat.onBusy((e: ChatBusyEvent) => setBusySessionId(e.sessionId))
+    // 阶段 7：工具执行状态（按当前 sessionId 过滤；preload agent 面未就绪则不订阅）
+    const agentApi = window.fairy.agent
+    const offNotice = agentApi?.onToolNotice
+      ? agentApi.onToolNotice((n: AgentToolNotice) => {
+          if (n.sessionId !== sessionRef.current) return
+          // 非生成期收到直接丢弃（不设定时器，无泄漏）；busy 期间只留最近一条
+          if (!busyRef.current) return
+          setToolStatus(toolNoticeText(n))
+        })
+      : () => {}
     return () => {
       offDelta()
       offDone()
       offBusy()
+      offNotice()
     }
   }, [])
+
+  // busy 结束即清空状态行（避免下次生成开头闪现上一轮的旧状态）
+  useEffect(() => {
+    if (!busy) setToolStatus(null)
+  }, [busy])
 
   // ===== 自动滚到底（用户上翻时不打扰） =====
   useEffect(() => {
@@ -206,7 +256,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           content: text,
           reasoning: '',
           error: null,
-          streaming: false
+          streaming: false,
+          hint: ''
         },
         {
           key: asstKey,
@@ -215,7 +266,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           content: '',
           reasoning: '',
           error: null,
-          streaming: true
+          streaming: true,
+          hint: ''
         }
       ])
       stickRef.current = true
@@ -299,6 +351,10 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
               )}
               {m.error && <div className="msg-error">{m.error}</div>}
             </div>
+            {/* 阶段 7：能力提示（气泡下方小灰条，仅非空时） */}
+            {m.role === 'assistant' && m.hint !== '' && (
+              <div className="capability-hint">{m.hint}</div>
+            )}
           </div>
         ))}
       </div>
@@ -331,7 +387,10 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
         </div>
         <div className="input-foot">
           <span>Enter 发送 · Shift+Enter 换行</span>
-          {busy && <span className="gen-hint">生成中…</span>}
+          <span className="foot-status">
+            {busy && toolStatus && <span className="tool-status">{toolStatus}</span>}
+            {busy && <span className="gen-hint">生成中…</span>}
+          </span>
         </div>
       </div>
     </div>

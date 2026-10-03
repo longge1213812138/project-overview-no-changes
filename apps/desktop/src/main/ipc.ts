@@ -14,6 +14,7 @@
  * - 阶段 5：日程面板：event:list / event:add / event:complete / event:remove；
  *   add/complete/remove 成功后广播 event:changed（聊天管道 schedule_* 与通知轮询变更在
  *   chat.ts/notify-loop.ts 内广播，三路汇一）
+ * - 阶段 7：agent:approvalRespond —— 提交工具审批决定（校验后交 agent-approval 结算）
  * 事件广播：
  * - 网关状态：sidecar onState → broadcast('gateway:state')，300ms 去抖合并（'gateway:state' 为阶段 2 遗留通道名，不在 IPC 常量表，保持兼容）
  * - 聊天事件（delta/done/busy）与会话变化（session:changed）由 chat.ts 直接走 windows.broadcast
@@ -42,6 +43,7 @@ import {
   sendChat,
   stopChat
 } from './chat'
+import { respondApproval } from './agent-approval'
 import { getEventStore } from './events'
 import { broadcast } from './windows'
 import { configureGateway, getGatewayState, onGatewayStateChanged } from './sidecar'
@@ -249,6 +251,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.chatStop, (_event, id: unknown) => {
     if (typeof id !== 'string') return
     return stopChat(id)
+  })
+
+  // ===== 阶段 7：工具审批（IPC 边界校验 → agent-approval 结算；未知/重复 id 静默忽略） =====
+  ipcMain.handle(IPC.agentApprovalRespond, (_event, id: unknown, approved: unknown) => {
+    if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('id 必须为有限数字')
+    if (typeof approved !== 'boolean') throw new Error('approved 必须为布尔值')
+    respondApproval(id, approved)
   })
 
   // ===== 阶段 4：记忆（面板 CRUD；add/update/remove/import 成功后广播 memoryChanged） =====

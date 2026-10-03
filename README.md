@@ -16,7 +16,7 @@ Windows 桌面私人助手：以 **DeepSeek 网页版会话**为 LLM 后端，**
 | 通道选择 | 设置页二选一：**OpenAI 兼容 API**（填 baseUrl+key+model）或 **DeepSeek 网页**（本地网关账号池）；**启动不自动登录**，网页通道需手动点「启动网关」 |
 | 桌面形态 | 托盘常驻、开机自启、系统通知 |
 
-明确不做（MVP 范围外）：工具循环 / Agent / 本地 Shell、Skill、MCP、云同步、多用户、cron 定时引擎。
+后续路线（阶段 7–9）：Agent 工具循环与受控本地 Shell、Skill、MCP、cron 定时引擎。**不做云同步和多用户**；MVP 及后续仍为本地单用户应用。阶段 7 的工具调用仅走 **API 通道**（web 通道不做 tools 适配与测试）。阶段和安全边界见 [`docs/DEV_PLAN.md`](docs/DEV_PLAN.md)。
 
 ## 快速开始
 
@@ -63,13 +63,13 @@ pnpm workspace 两个包：
 
 ```
 apps/desktop     Electron + React + Vite（main / preload / renderer）
-packages/core    纯 TS 核心逻辑（llm / gateway / sessions / store / memory / intent / calendar），vitest 单测
+packages/core    纯 TS 核心逻辑（llm / gateway / sessions / store / memory / intent / calendar / agent），vitest 单测
 ```
 
 ```bash
 pnpm dev            # electron-vite 开发（已处理 ELECTRON_RUN_AS_NODE 陷阱）
 pnpm typecheck      # 全部 tsconfig
-pnpm test           # core 单元测试（137 用例，含真实网关 spawn 集成）
+pnpm test           # core 单元测试（含真实网关 spawn 集成）
 pnpm build          # electron-vite 产物到 out/
 pnpm package:win    # 打包：NSIS 安装包 + 免安装单 EXE → apps/desktop/release/
 ```
@@ -79,7 +79,7 @@ pnpm package:win    # 打包：NSIS 安装包 + 免安装单 EXE → apps/deskto
 可用 `FAIRY_GATEWAY_DIR=<含 ds-free-api.exe 的目录>` 指定来源。
 本机打包的完整命令（Node 路径 / 镜像 / 代理变量）见 `docs/DEV_PLAN.md` 附录 C。
 
-架构：renderer 只经 preload 的 `window.fairy`（契约 `packages/core/src/ipc.ts`）与 main 通信；LLM 流式、意图解析、记忆注入、日程轮询均在 main 侧编排；`better-sqlite3` 为 N-API 预编译（node/electron 通吃，无需 VS Build Tools）。
+架构：renderer 只经 preload 的 `window.fairy`（契约 `packages/core/src/ipc.ts`）与 main 通信；LLM 流式、意图解析、记忆注入、日程轮询均在 main 侧编排；阶段 7 的 Agent 工具运行时位于纯 TypeScript core，工具执行器（含受控 Shell）只从 main 入口导出，renderer bundle 实测无任何 OS 执行能力（`entry-isolation.test.ts` 护栏）。受控 Shell 采用命令白名单 + realpath 工作区路径边界 + 无 shell 解释器的最小环境子进程（本机无原生依赖，**非 OS 级沙箱**，边界与残余风险见 `docs/DEV_PLAN.md` §6 阶段 7 实施备注）；`better-sqlite3` 为 N-API 预编译（node/electron 通吃，无需 VS Build Tools）。
 
 ## 打包硬化（阶段 6）
 
@@ -97,7 +97,9 @@ pnpm package:win    # 打包：NSIS 安装包 + 免安装单 EXE → apps/deskto
 |---|---|
 | ✅ | 阶段 0–5 + 通道选择（DEV_PLAN §6 / §5.6）：脚手架、LLM 桥、sidecar+登录引导、会话+聊天 UI+双窗口、记忆（FTS5）、日程（意图+通知+面板） |
 | ✅ | 阶段 6 打包硬化：NSIS 自启默认勾选 + 免安装 EXE、凭据 DPAPI、滚动日志+诊断导出、网关二进制随包分发（待干净虚拟机验收） |
-| 🏷 | `m0` 已打；`m1/m2/m3` 待 GUI 验收后补打（清单见 `PROJECT_STATE.md` §5） |
+| ✅ | 阶段 7 Agent 工具运行时：工具注册表 + 能力探测（API 通道实测 supported）+ 审批 IPC/对话框 + 受控 Shell（白名单 + 工作区路径边界）；227 单测 + 真实 API 端到端 4/4；待 GUI 人工验收 |
+| 📋 | 阶段 8 Skill + MCP；阶段 9 cron 定时引擎 |
+| 🏷 | `m0` 已打；`m1/m2/m3` 已提前打在根提交 `b001520`，待 GUI 验收；若验收后有修复，需将 tag 移到修复提交（清单见 `PROJECT_STATE.md` §5） |
 
 ## 注意
 

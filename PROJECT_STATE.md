@@ -1,13 +1,14 @@
 # Fairy 项目交接材料
 
-> 交接编号：H7 ｜ 状态：**阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化全部代码完成（含本机安装/自启/卸载烟测）；待 GUI 验收 + 干净虚拟机验收** ｜ 更新时间：2026-10-02
+> 交接编号：H8 ｜ 状态：**MVP 阶段 2–6 代码完成；阶段 7 代码完成（真实 API E2E 4/4）；GUI 验收 + 干净虚拟机验收待做** ｜ 更新时间：2026-10-03
 > 工作目录（绝对路径）：`C:\Users\91533\Desktop\Fairy`
 
 ## 1. 任务与版本
 
 - **目标**：Fairy = Windows 桌面私人助手，以 **DeepSeek 网页版**（chat.deepseek.com 会话）为 LLM 后端，零 API 成本。MVP 范围 F1–F7 见 `docs/DEV_PLAN.md` §1。
-- **范围（MVP）**：聊天（流式）、多会话、"帮我记东西"、日程+托盘通知、FTS5 长期记忆、托盘/Alt+Space 浮窗/开机自启、登录引导流。明确不做：工具循环/Agent/Shell、Skill、MCP、云同步、多用户、cron 引擎。
-- **完成标准**：里程碑 M0–M4（见 DEV_PLAN §9），当前 **M0 已达成；MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化全部代码完成（待 GUI 验收 + 干净虚拟机验收后打 m1/m2/m3/m4）**。
+- **范围（MVP）**：聊天（流式）、多会话、"帮我记东西"、日程+托盘通知、FTS5 长期记忆、托盘/Alt+Space 浮窗/开机自启、登录引导流。
+- **MVP 后续范围（用户决定，2026-10-03）**：阶段 7–9：工具循环/Agent/本地 Shell、Skill、MCP、cron 定时引擎；**不做云同步和多用户**，产品保持本地单用户。
+- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/能力探测/审批 IPC/受控 Shell 代码完成并通过真实 API 端到端验收，待 GUI 人工验收。
 - **git 位置**：历史（当前唯一提交 = 根提交 `b001520 "MVP"`，81 文件）：
   - `bf06919` 阶段 0：pnpm workspace + Electron 骨架 + 图标 + NSIS 打包通过
   - `b9932fe` docs：附录 C 本机环境备忘
@@ -18,27 +19,27 @@
   - `f4e61df` 通道选择：启动不自动登录，用户选 OpenAI API 或 DeepSeek 网页（§5.6）
   - `75876c5` 阶段 5：日程（意图 schedule_* + 通知轮询 + 面板）
 - **tag**：`m1`/`m2`/`m3` 已打在 `b001520`（用户指示先打，**GUI 验收尚未完成**；若验收后修复，用 `git tag -f m1 m2 m3` 移到修复提交）。`m0` 在历史提交 `5573a02`。
-- **文档版本**：`docs/DEV_PLAN.md` v0.2（需求收敛后的有效版本）。
+- **文档版本**：`docs/DEV_PLAN.md` v0.3（MVP 后续路线图；范围含阶段 7–9，不含云同步/多用户）。
 
 ## 2. 权威资料
 
 | 资料 | 位置 | 管哪部分 |
 |---|---|---|
-| 开发计划（架构/阶段/验收/数据模型/风险） | `docs/DEV_PLAN.md`（v0.2） | 全部任务事实的总纲；验收标准以 §6 各阶段"验收"为准 |
+| 开发计划（架构/阶段/验收/数据模型/风险） | `docs/DEV_PLAN.md`（v0.3） | 全部任务事实的总纲；验收标准以 §6 各阶段"验收"为准 |
 | 本机环境备忘（Node 路径/镜像/打包命令/陷阱） | `docs/DEV_PLAN.md` 附录 C | 本机 Windows 开发环境与打包操作 |
 | 蓝本（只读参考，nested gitlink，不参与构建） | `reference/deepseek-pp/` | 仅借鉴设计（记忆系统命名、schema 迁移规则）；自建网关（阶段 6 可选项）才需精读其 `core/deepseek/*` |
 | 阶段 1 产出（已完成） | `docs/llm-bridge-notes.md`（已创建） | LLM 网关的 model 取值、会话过期报错指纹、限速特征 |
 
-冲突规则：DEV_PLAN 与蓝本冲突时以 DEV_PLAN 为准（MVP 已明确砍掉蓝本的 tool-loop/shell-host 等）。
+冲突规则：DEV_PLAN 与蓝本冲突时以 DEV_PLAN 为准；仅参考蓝本设计，不把蓝本的工具执行或自动化权限机制直接视为本项目决策。
 
 ## 3. 决定与限制
 
 **用户已确认（DEV_PLAN 即用户认可的方案）**：
-- LLM 通道：OpenAI 兼容 `/v1/chat/completions` **流式**即可，不要求 tools；默认网页会话（免费），可填官方 API Key 兜底（通道可替换）。
+- MVP 的 LLM 通道：OpenAI 兼容 `/v1/chat/completions` 流式即可，不要求 tools；阶段 7 Agent 扩展现正加入 tools 请求/响应支持，**仅验证 API 通道**（web 通道不做 tools 适配与测试，2026-10-03）。
 - 网关选型：**ds-free-api（Rust 单文件）为 sidecar 首选**，deeperseeker（Python）备选；main 进程 spawn 管理生命周期。
 - "记东西/日程"走**意图解析**（非流式小调用出严格 JSON）不走工具调用；解析失败一律兜底 `chat`，绝不写脏数据。
 - 数据库：better-sqlite3（WAL + FTS5），关键词+权重检索，**不引入 embedding**。
-- 配置/凭据存 `%APPDATA%/fairy/config.json`（账号+密码+device_id，MVP 明文，阶段 6 上 DPAPI）。
+- 配置存 `%APPDATA%/fairy/config.json`；凭据存 `secrets.dpapi.json` 并由 Electron `safeStorage`（Windows DPAPI）保护，旧明文自动迁移。
 
 **Agent 自行选择（待用户推翻）**：
 - 浮窗 380×560、主窗口底部 tab（日程/记忆/设置）布局、上下文裁剪预算 6000 token 等 DEV_PLAN 参数。
@@ -48,6 +49,12 @@
 **用户新决定（2026-09-27）**：
 - **阶段 5（日程）**：一度暂缓，同日恢复并完成（见 §4 与 `75876c5`）。
 - **通道选择优先**：启动不自动登录 DeepSeek 网页，设置页让用户选 OpenAI 兼容 API 或 DeepSeek 网页（已实现，DEV_PLAN 新增 §5.6）。
+
+**用户新决定（2026-10-03）**：
+- MVP 完成后继续阶段 7–9：Agent/工具循环/本地 Shell、Skill、MCP、cron。
+- 不做云同步和多用户；继续本地单用户产品边界。
+- Shell 目标权限为默认限当前工作区、越界操作需用户确认；工作目录本身不构成 OS 隔离，须选定并验证隔离边界（后续指令：阶段 7 直接实现 Shell 并验收，不再暂缓）。
+- 阶段 7 工具调用只走 **API 通道**：不做 web 通道的 tools 适配与测试；web 通道保留聊天功能，激活 web + 已注册工具时须明确能力提示、不得静默降级。
 
 **本机硬性限制（附录 C，务必遵守）**：
 - Node 24.21.0 位于 `C:\Users\91533\.fairy-tools\node24\node-v24.21.0-win-x64`（用户 PATH 最前；**旧终端不生效**，开新终端或手动拼 PATH）。
@@ -68,14 +75,15 @@
 | 阶段 5 日程 | ✅ **代码完成（2026-09-27），待 GUI 验收** | 迁移 v3（events+索引，真实库 v2→v3 烟测）；意图 schedule_add/done/cancel/query（add 非法时间追问一次、不写脏数据）；notify-loop 30s 轮询→通知→点通知开日程 tab、启动 sweep 已过期不补弹、退出前未触发提示；CalendarPanel（今天/明天/全部/勾选/手动增删/徽章）；测试 137/137 绿 |
 | 通道选择（§5.6，插入需求） | ✅ **完成（2026-09-27），待 GUI 验收** | 启动零登录烟测通过（12s 零 ds-free-api 进程/零端口）；channel=null 选择卡、API 表单（baseUrl/key/model）、网页通道需手点「启动网关」才登录、切 API 自动停网关、过期指纹按通道门控（仅 web 上报托盘红） |
 | 阶段 6 打包硬化 | ✅ **代码完成（2026-10-02），本机烟测通过，待干净虚拟机验收** | `electron-builder.yml`（NSIS+portable、extraResources 带网关二进制/双图标）+ `resources/installer.nsh`（安装选项页「开机自启」默认勾选，`/S` 也默认开；卸载清理 Run 键）+ `scripts/stage-extras.mjs`；凭据 DPAPI：`main/secrets.ts` + `config.ts` 重写（明文自动迁移、config.json 只剩非敏感字段）；日志 `main/logger.ts`（electron-log 按天滚动留 7 天 + 崩溃/子进程留痕）+ 诊断导出 `main/diagnostics.ts`（脱敏报告）+ 设置页「应用」区（自启开关/导出诊断/日志目录）+ `main/autostart.ts`。烟测：打包出 `Fairy Setup 0.0.1.exe`（112MB）+ `Fairy-0.0.1-portable.exe`（112MB）；静默安装→Run 键 `com.fairy.assistant` 写入→实机启动日志 `[autostart] openAtLogin=true`→静默卸载键/目录/卸载项全清；旧明文 config 自动迁移到 `secrets.dpapi.json`（protected:true，打包/开发两种上下文解密均成功），`config.json` 已无任何凭据；137 测试绿 + typecheck 绿 |
+| 阶段 7 Agent 工具运行时 | ✅ **代码完成（2026-10-03），待 GUI 人工验收** | core：`agent/runtime`（有界循环+授权决策 allowOutside/reason 穿透）、`agent/registry`（ToolRegistry + createRegistryAuthorizer，风险/审批/assess 策略，默认拒绝）、`agent/capability`（probeToolsSupport 两段探测三态）、`agent/tools`（pathguard 真实路径边界 + workspace_files + get_current_time + 受控 shell：白名单9命令/危险名单先查/spawn 无 shell/最小 env/输出截断）。main：`agent-approval.ts`（广播审批+60s超时拒绝+停止取消+全日志）、`agent-tools.ts`（workspace=%APPDATA%/fairy/workspace + 注册表装配 + 探测缓存）、chat 接线（通道门控+capabilityHint+toolNotice 广播）、浮窗 Esc 豁免。renderer：`ApprovalDialog`（队列/默认拒绝/Esc拒绝/越界红条）+ ChatPane 状态行/hint 灰条（落 meta 重开仍在）。证据：**227 单测 + 4 E2E 全绿、全仓 typecheck 绿、build 绿、bundle 实测无 OS 执行器、真实 agnes API 探测=supported(required)**。Shell 边界=白名单+路径边界+进程管控（**非 OS 级沙箱**，本机无原生依赖；DEV_PLAN 阶段 7 实施备注已如实声明）。 |
 
-代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/SettingsTab（新增「应用」区）+ 底部 tab。**尚未做**：GUI 验收、干净虚拟机验收。无运行中的任务/进程（烟测已清理）。
+代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/SettingsTab + ApprovalDialog + 底部 tab。**尚未做**：阶段 7 GUI 人工验收（清单见 §5 ③）、MVP GUI 验收、干净虚拟机验收。
 
-**已解决/已知事实**（原“未确认项”已全部落地）：ds-free-api v0.2.11 本机下载+运行 OK；账号池+device_id 登录 OK（凭据在 `%APPDATA%/fairy/config.json` 与 `~/.fairy-tools/.../config.toml`，明文，勿入 git）。
+**已解决/已知事实**（原“未确认项”已全部落地）：ds-free-api v0.2.11 本机下载+运行 OK；账号池+device_id 登录 OK（应用侧凭据由 DPAPI 保护；网关运行配置含临时明文，停止/退出即删，勿入 git）。
 
 ## 5. 接续动作
 
-**阶段 2/3/4/5 + 通道选择 + 阶段 6 全部代码完成，下一步 = ① GUI 验收（合并清单 1-7）+ 阶段 6 验收（清单 8）→ 移 tag `m1`/`m2`/`m3`/`m4` → ② 试用反馈迭代**：
+**当前并行事项**：① 阶段 7 GUI 人工验收（清单 ③）；② MVP GUI/干净虚拟机验收仍待执行，按下方清单完成后再处理 tag `m1`/`m2`/`m3`/`m4` 与试用反馈：
 
 **① GUI 验收清单（阶段 2/3/4/5 + 通道选择合并，DEV_PLAN §6 各阶段验收 + §9 M2/M3）**：
 1. `pnpm dev`（新终端，Node 24，`ELECTRON_RUN_AS_NODE` 未被继承）。
@@ -112,10 +120,22 @@
 
 **② 阶段 5 已完成（`75876c5`，暂缓后同日恢复）**：迁移 v3 events 表、意图 schedule_*、notify-loop、CalendarPanel 均已落地（详见 §4）。
 
-**注意事项**：通道选择遗留：`gateway:getState/configure/state` 通道名不在 IPC 常量表（兼容保留）、api.apiKey 明文（阶段 6 DPAPI 一并处理）；done/cancel 匹配依赖 title LIKE 关键词（模型分词质量影响命中）；通知单次触发（构造异常也 markFired 防刷屏）；空闲抽取是全局单例 5min 定时器；面板列表 limit 无分页（memory 200/events 500）；`.pi/` 已入 .gitignore；生成中切走再切回占位为空、bundle >500kB 等阶段 3 遗留仍有效；`electron-builder.yml` 已设 `npmRebuild: false`，阶段 6 打包需补 extraResources（红图标+网关二进制）。
+**③ 阶段 7 GUI 人工验收清单（2026-10-03 新增；真实 API E2E 4/4 已自动通过）**：
+1. `pnpm dev`（新终端，Node 24）；设置页确认 API 通道（agnes 配置已有）。
+2. 聊天里说「用 get_current_time 工具查一下现在几点」→ **弹审批对话框**（工具名/绿「只读」徽标/JSON 入参）→ 点「允许」→ 回复含真实时间；输入区下方出现 🔧 工具状态行（等待审批→执行中→已完成）。
+3. 同样请求再触发一次 → 点「拒绝」或按 **Esc** → 模型收到拒绝原因、不执行（回复中可见）。
+4. 审批弹出后放 60 秒不理 → 对话框自行关闭（超时拒绝），`logs` 里 `[approval] ... reason=timeout`。
+5. 「用 shell 运行 whoami」→ 审批（红「执行」徽标）→ 允许 → 输出用户名；「用 shell 读 ..\..\ 下某文件」→ 审批对话框出现**越界红条警告**（reason 显示具体路径）。
+6. 拒绝类（白名单）：「用 shell 运行 powershell Get-Date」→ 即便模型调用也 `denied`（日志 reason=白名单外/安全策略禁止），回复可见拒绝。
+7. web 通道：切到网页通道发任意消息 → 气泡下灰条「当前为 DeepSeek 网页通道，工具调用仅支持 API 通道…」（重开会话灰条仍在，已落 meta）。
+8. 浮窗（Alt+Space）触发审批 → 对话框出现，且**有 pending 时 Esc 不收窗**（Esc=拒绝）；失焦收窗仍正常。
+9. 主窗与浮窗同时收到审批 → 任一窗口响应后另一窗对话框自动关闭（settled）。
+10. 生成中点「停止」→ 悬挂审批立即以 cancelled 关闭，无残留对话框。
+
+**注意事项**：**web 账号已被禁言（muted，2026-10-03 实测，至 2026-10-11 21:37）**——web 通道聊天验收需等解禁；阶段 7 工具测试不受影响（已定仅 API 通道）。**阶段 7 新增**：① Electron safeStorage 的 DPAPI 熵绑定 app name（dev/打包均 productName=Fairy 故互通；外部解密脚本必须 `app.setName('Fairy')`，见 scripts/unlock-e2e-config.cjs）；② E2E 复跑：`npx electron scripts/unlock-e2e-config.cjs` → `FAIRY_E2E_CONFIG=<路径> vitest run src/agent/e2e.api.test.ts`（key 不落日志）；③ LLM client endpoint 已归一（baseUrl 带完整 /v1/chat/completions 路径不再二次拼接）；④ shell 白名单/越界审批是当前唯一执行边界，扩白名单前先过 DEV_PLAN 阶段 7 实施备注的残余风险评估。通道选择遗留：`gateway:getState/configure/state` 通道名不在 IPC 常量表（兼容保留）；done/cancel 匹配依赖 title LIKE 关键词（模型分词质量影响命中）；通知单次触发（构造异常也 markFired 防刷屏）；空闲抽取是全局单例 5min 定时器；面板列表 limit 无分页（memory 200/events 500）；`.pi/` 已入 .gitignore；生成中切走再切回占位为空、bundle >500kB 等阶段 3 遗留仍有效；`electron-builder.yml` 已设 `npmRebuild: false`，阶段 6 打包需补 extraResources（红图标+网关二进制）。
 
 ## 6. 交接简区
 
-- 编号：**H7**（H1-H6 已完成归档）
+- 编号：**H8**（H1-H7 已完成归档）
 - 源对话：本机 Pi 会话
-- 状态：阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化全部代码完成（137 测试绿 + typecheck 绿 + 打包/安装/自启/卸载/DPAPI 迁移烟测通过）；tag `m1`/`m2`/`m3` 已打在 `b001520`（GUI 验收前打的，验收后如有修复需 `-f` 移 tag）；剩 GUI 验收 + 干净虚拟机验收（清单 §5 ①/⑧），过后打 `m4`
+- 状态：MVP 阶段 2–6 代码完成；**阶段 7 代码完成**（227 单测 + typecheck + build + 真实 agnes API 端到端 4/4：probe supported/双工具多轮往返/deny 零执行/shell whoami 真实执行），tools 仅 API 通道，Shell=白名单+路径边界（**非 OS 级沙箱**，DEV_PLAN 阶段 7 实施备注已声明）。待办：阶段 7 GUI 人工验收（§5 ③）、MVP GUI/干净虚拟机验收（web 账号禁言至 2026-10-11 影响 web 聊天项）；tag `m1`/`m2`/`m3` 已打在 `b001520`，验收后如有修复需移动。

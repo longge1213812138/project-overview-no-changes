@@ -1208,3 +1208,200 @@ body {
   font-size: 13px;
   opacity: 0.55;
 }
+
+/* ===== 阶段 7：工具审批浮层 / 能力提示 / 工具状态行 ===== */
+
+/* 全屏半透明遮罩 + 居中卡片（无请求时不渲染，见 agent/ApprovalDialog.tsx） */
+.approval-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+.approval-card {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(84vh, 720px);
+  padding: 16px 18px 14px;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  border-radius: 14px;
+  background: var(--color-bg, #fafafa);
+  color: var(--color-fg, #222);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.4);
+  overflow: auto;
+}
+.approval-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.approval-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+/* 队列里还有后续待审请求（一次只展示队首） */
+.approval-pending {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(79, 70, 229, 0.12);
+  color: #4f46e5;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.approval-tool-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.approval-tool-name {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+/* 风险徽标：read 绿 / write 橙 / exec 红；来源徽标：中性灰 */
+.risk-badge,
+.source-badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.risk-read {
+  background: rgba(22, 163, 74, 0.14);
+  color: #16a34a;
+}
+.risk-write {
+  background: rgba(234, 88, 12, 0.14);
+  color: #ea580c;
+}
+.risk-exec {
+  background: rgba(220, 38, 38, 0.14);
+  color: #dc2626;
+}
+.source-badge {
+  background: rgba(107, 114, 128, 0.14);
+  color: rgba(107, 114, 128, 0.95);
+}
+.approval-desc {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.7;
+  opacity: 0.75;
+}
+/* 越界警告条（outside=true，文案取 request.reason） */
+.approval-outside {
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(220, 38, 38, 0.45);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.approval-input-head {
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.55;
+}
+/* 入参 JSON（超过 2000 字符已由组件截断） */
+.approval-input {
+  flex: 1;
+  min-height: 64px;
+  max-height: 40vh;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(107, 114, 128, 0.3);
+  border-radius: 8px;
+  background: rgba(107, 114, 128, 0.08);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+/* reason 小字（越界时已在警告条里，不重复展示） */
+.approval-reason {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.6;
+}
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.approval-actions .btn {
+  margin-top: 0;
+  min-width: 88px;
+  padding: 7px 16px;
+  font-size: 13.5px;
+}
+/* 「拒绝」为默认焦点（Enter = 拒绝）：聚焦时给可见焦点环 */
+.approval-deny:focus-visible {
+  outline: none;
+  border-color: #dc2626;
+  color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25);
+}
+.approval-allow:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.3);
+}
+.approval-foot {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+/* 能力提示小灰条：assistant 气泡下方独占一行（追加覆盖，不改上方 .msg-row 定义） */
+.msg-row {
+  flex-wrap: wrap;
+}
+.capability-hint {
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(107, 114, 128, 0.12);
+  color: rgba(107, 114, 128, 0.95);
+  font-size: 11.5px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* 输入区工具状态行（.gen-hint 旁，仅 busy 期间渲染） */
+.foot-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.tool-status {
+  max-width: 46vw;
+  color: rgba(107, 114, 128, 0.95);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

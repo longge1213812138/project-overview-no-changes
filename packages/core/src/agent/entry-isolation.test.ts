@@ -1,0 +1,40 @@
+/**
+ * 阶段 7 验收：「renderer 无直接 OS 执行能力」。
+ *
+ * index.web.ts 是 renderer 的唯一 @fairy/core 入口（electron-vite alias），
+ * 必须只暴露 web-safe 的运行时/契约面：工具执行器（shell/files/clock 等 OS 执行器）
+ * 绝不能出现在该导出面——否则打包后 renderer bundle 即持有本机执行能力。
+ */
+import { describe, expect, it } from 'vitest';
+import * as webEntry from '../index.web';
+import * as mainEntry from '../index';
+
+const WEB_UNSAFE_EXPORTS = [
+  'createBuiltinTools',
+  'createShellTool',
+  'createWorkspaceFilesTool',
+  'createClockTool',
+  'resolveWorkspacePath',
+  'ALLOWED_COMMANDS'
+];
+
+describe('renderer 入口隔离（index.web）', () => {
+  it('导出 OS 执行器相关符号（阶段 7 工具执行器只允许 main 入口持有）', () => {
+    for (const name of WEB_UNSAFE_EXPORTS) {
+      expect(webEntry, `index.web 泄漏了 ${name}`).not.toHaveProperty(name);
+    }
+  });
+
+  it('main 完整入口持有执行器与装配函数（对照面）', () => {
+    expect(mainEntry).toHaveProperty('createBuiltinTools');
+    expect(mainEntry).toHaveProperty('createShellTool');
+  });
+
+  it('web-safe 面仍可用：运行时/审批策略/类型契约可达', () => {
+    expect(webEntry).toHaveProperty('runAgent');
+    expect(webEntry).toHaveProperty('ToolRegistry');
+    expect(webEntry).toHaveProperty('createRegistryAuthorizer');
+    expect(webEntry).toHaveProperty('probeToolsSupport');
+    expect(webEntry).toHaveProperty('IPC');
+  });
+});

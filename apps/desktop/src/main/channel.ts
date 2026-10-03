@@ -133,9 +133,9 @@ export async function stopGatewayAction(): Promise<ChannelState> {
   return getChannelState()
 }
 
-/** 聊天/意图/抽取共用：解析当前可用通道 */
+/** 聊天/意图/抽取共用：解析当前可用通道；capabilityKey 供阶段 7 能力探测按端点+模型缓存 */
 export type ActiveChannel =
-  | { ok: true; channel: ChannelKind; client: LlmClient }
+  | { ok: true; channel: ChannelKind; client: LlmClient; capabilityKey: string }
   | { ok: false; error: string }
 
 /**
@@ -160,7 +160,8 @@ export function resolveActiveChannel(): ActiveChannel {
     return {
       ok: true,
       channel: 'api',
-      client: createLlmClient({ baseUrl: api.baseUrl, apiKey: api.apiKey, model: api.model })
+      client: createLlmClient({ baseUrl: api.baseUrl, apiKey: api.apiKey, model: api.model }),
+      capabilityKey: `api:${api.baseUrl}|${api.model}`
     }
   }
 
@@ -170,7 +171,8 @@ export function resolveActiveChannel(): ActiveChannel {
     return {
       ok: true,
       channel: 'web',
-      client: createLlmClient({ baseUrl: `http://127.0.0.1:${gw.port}`, apiKey: cfg.apiKey })
+      client: createLlmClient({ baseUrl: `http://127.0.0.1:${gw.port}`, apiKey: cfg.apiKey }),
+      capabilityKey: 'web'
     }
   }
   return { ok: false, error: 'DeepSeek 网页网关未启动，请在设置页启动' }

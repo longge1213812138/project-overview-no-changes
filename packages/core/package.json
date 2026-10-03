@@ -2,7 +2,7 @@
   "name": "@fairy/core",
   "version": "0.0.1",
   "private": true,
-  "description": "Fairy assistant core (pure TS, no Electron deps) - sessions/memory/calendar/intent logic",
+  "description": "Fairy assistant core (pure TS, no Electron deps) - sessions/memory/calendar/intent/agent runtime",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {

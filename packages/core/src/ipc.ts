@@ -3,6 +3,8 @@
  * preload 按 FairyApi 暴露 window.fairy；renderer 不直接 import electron。
  */
 
+import type { AgentApprovalRequest, AgentToolNotice } from './agent/registry';
+
 /** DeepSeek 账号配置（v0.2.11 账号池模式，明文存 %APPDATA%/fairy/config.json，阶段 6 上 DPAPI） */
 export interface GatewayAccountConfig {
   /** 邮箱或手机号；纯数字视为手机号（area_code 默认 +86） */
@@ -76,6 +78,18 @@ export interface FairyApi {
   };
   /** 点系统通知 → 主窗口切到指定 tab */
   onOpenTab(cb: (tab: TabKey) => void): () => void;
+
+  // ===== 阶段 7：工具审批（renderer 只展示与回传决定，不执行任何工具） =====
+  agent: {
+    /** 订阅审批请求（第一个响应生效；超时/停止/已受理会发 settled 关闭对话框） */
+    onApproval(cb: (request: AgentApprovalRequest) => void): () => void;
+    /** 提交审批决定（id 必须来自 onApproval；重复/未知 id 静默忽略） */
+    respondApproval(id: number, approved: boolean): Promise<void>;
+    /** 订阅审批已结算（本窗口对话框应关闭） */
+    onApprovalSettled(cb: (event: AgentApprovalSettledEvent) => void): () => void;
+    /** 工具执行状态（可观测；日志真源在 main） */
+    onToolNotice(cb: (notice: AgentToolNotice) => void): () => void;
+  };
   /** 仅允许 http/https（main 侧校验） */
   openExternal(url: string): Promise<void>;
   /** 订阅网关状态变化，返回退订函数 */
@@ -169,11 +183,24 @@ export interface ChatDoneEvent {
   aborted?: boolean;
   error?: string;
   elapsedMs?: number;
+  /**
+   * 阶段 7：通道不支持/未确认工具调用时的明确能力提示（不做静默降级）；
+   * ok=true 时也可携带（聊天正常完成但工具未启用）。
+   */
+  capabilityHint?: string;
 }
 
 export interface ChatBusyEvent {
   /** null = 空闲 */
   sessionId: string | null;
+}
+
+/** 审批已结算（main → renderer：对话框关闭原因） */
+export interface AgentApprovalSettledEvent {
+  id: number;
+  approved: boolean;
+  /** 'timeout' | 'cancelled'（生成中止/退出清理） */
+  reason?: string;
 }
 
 /** IPC 通道名（main 注册 / preload 转发，集中在此防拼写漂移） */
@@ -211,7 +238,16 @@ export const IPC = {
   appAutoStartGet: 'app:autoStartGet',
   appAutoStartSet: 'app:autoStartSet',
   appDiagnosticsExport: 'app:diagnosticsExport',
-  appOpenLogs: 'app:openLogs'
+  appOpenLogs: 'app:openLogs',
+  // ===== 阶段 7：工具审批与可观测事件 =====
+  /** main → renderer：请求审批（广播，任一窗口响应第一个生效） */
+  agentApprovalRequest: 'agent:approvalRequest',
+  /** main → renderer：审批已被受理/超时/取消（关闭其他窗口的待审对话框） */
+  agentApprovalSettled: 'agent:approvalSettled',
+  /** renderer → main：提交审批决定 */
+  agentApprovalRespond: 'agent:approvalRespond',
+  /** main → renderer：工具执行状态（requested/denied/started/completed/failed） */
+  agentToolNotice: 'agent:toolNotice'
 } as const;
 
 // ===== 阶段 4：记忆类型 =====

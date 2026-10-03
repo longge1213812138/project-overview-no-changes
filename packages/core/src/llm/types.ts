@@ -1,14 +1,36 @@
 /** OpenAI 兼容 LLM 客户端类型（阶段 2，见 docs/llm-bridge-notes.md §3） */
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  name?: string;
+  toolCallId?: string;
+  toolCalls?: ChatToolCall[];
+}
+
+export interface ChatToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface ChatToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 export interface ChatResult {
   content: string;
   reasoning?: string;
   finishReason?: string;
+  toolCalls?: ChatToolCall[];
 }
 
 /** 流式回调：content/reasoning 分别累进投递 */
@@ -34,6 +56,8 @@ export interface LlmClientOptions {
 export interface ChatCallOptions {
   signal?: AbortSignal;
   maxTokens?: number;
+  tools?: ChatToolDefinition[];
+  toolChoice?: 'auto' | 'none' | 'required';
 }
 
 export interface LlmClient {

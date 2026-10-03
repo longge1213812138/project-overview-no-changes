@@ -25,6 +25,15 @@ function preloadPath(): string {
   return join(__dirname, '../preload/index.js')
 }
 
+/**
+ * 阶段 7：浮窗 Esc 豁免门。有待审工具审批时返回 true → Esc 交给 renderer 审批
+ * 对话框（拒绝），不收起浮窗。由 agent-approval 模块注册（单向依赖，不成环）。
+ */
+let escGate: (() => boolean) | null = null
+export function setFloatEscGate(fn: (() => boolean) | null): void {
+  escGate = fn
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWin
 }
@@ -157,9 +166,10 @@ export async function createFloatWindow(): Promise<void> {
     if (floatWin === win) floatWin = null
   })
 
-  // 规格：Esc 收起
+  // 规格：Esc 收起（阶段 7 豁免：有待审工具审批时，Esc 优先给审批对话框作拒绝用）
   win.webContents.on('before-input-event', (_event, input) => {
     if (input.type === 'keyDown' && input.key === 'Escape') {
+      if (escGate !== null && escGate()) return
       hideFloat()
     }
   })

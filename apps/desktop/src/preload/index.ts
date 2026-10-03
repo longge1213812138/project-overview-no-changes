@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { APP_NAME, FAIRY_VERSION, IPC } from '@fairy/core'
 import type {
+  AgentApprovalRequest,
+  AgentApprovalSettledEvent,
+  AgentToolNotice,
   ApiChannelConfig,
   ChannelActionResult,
   ChannelKind,
@@ -81,6 +84,18 @@ contextBridge.exposeInMainWorld(
       onEvent<{ tab: TabKey }>(IPC.appOpenTab, (payload) => cb(payload.tab)),
 
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke('app:openExternal', url),
+
+    // ===== 阶段 7：工具审批（renderer 只展示与回传决定；settled 到达即关闭对话框） =====
+    agent: {
+      onApproval: (cb: (request: AgentApprovalRequest) => void): (() => void) =>
+        onEvent<AgentApprovalRequest>(IPC.agentApprovalRequest, cb),
+      respondApproval: (id: number, approved: boolean): Promise<void> =>
+        ipcRenderer.invoke(IPC.agentApprovalRespond, id, approved),
+      onApprovalSettled: (cb: (event: AgentApprovalSettledEvent) => void): (() => void) =>
+        onEvent<AgentApprovalSettledEvent>(IPC.agentApprovalSettled, cb),
+      onToolNotice: (cb: (notice: AgentToolNotice) => void): (() => void) =>
+        onEvent<AgentToolNotice>(IPC.agentToolNotice, cb)
+    },
 
     // 'gateway:state' 为阶段 2 遗留通道（不在 IPC 常量表，保持兼容）
     onGatewayState: (cb: (state: GatewayState) => void): (() => void) =>

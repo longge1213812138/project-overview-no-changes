@@ -3,6 +3,7 @@ import type {
   ChatCallOptions,
   ChatMessage,
   ChatResult,
+  ChatToolCall,
   LlmClient,
   LlmClientOptions,
   StreamHandlers
@@ -36,6 +37,13 @@ function isAbort(e: unknown, signal?: AbortSignal): boolean {
 
 export function createLlmClient(opts: LlmClientOptions): LlmClient {
   const baseUrl = opts.baseUrl.replace(/\/+$/, '');
+  /**
+   * 端点归一（阶段 7 E2E 发现的真实配置形态）：用户可能按供应商示例把 baseUrl
+   * 填成完整路径（…/v1/chat/completions），此时不得再二次拼接，否则 404。
+   */
+  const endpoint = /\/(v\d+\/)?chat\/completions$/.test(baseUrl)
+    ? baseUrl
+    : `${baseUrl}/v1/chat/completions`;
   const model = opts.model ?? 'default';
   const requestTimeoutMs = opts.requestTimeoutMs ?? 60_000;
   const idleTimeoutMs = opts.idleTimeoutMs ?? 30_000;
@@ -46,9 +54,54 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
     'Content-Type': 'application/json'
   };
 
-  function buildBody(messages: ChatMessage[], stream: boolean, maxTokens?: number): string {
-    const body: Record<string, unknown> = { model, stream, messages };
-    if (maxTokens !== undefined) body.max_tokens = maxTokens;
+  function parseToolCalls(value: unknown): ChatToolCall[] | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (!Array.isArray(value)) throw new LlmError('LLM 返回的 tool_calls 格式无效');
+    return value.map((item, index) => {
+      if (typeof item !== 'object' || item === null) {
+        throw new LlmError(`LLM 返回的 tool_calls[${index}] 格式无效`);
+      }
+      const call = item as Record<string, unknown>;
+      const fn = typeof call.function === 'object' && call.function !== null
+        ? (call.function as Record<string, unknown>)
+        : null;
+      if (
+        typeof call.id !== 'string' ||
+        call.id === '' ||
+        call.type !== 'function' ||
+        !fn ||
+        typeof fn.name !== 'string' ||
+        fn.name === '' ||
+        typeof fn.arguments !== 'string'
+      ) {
+        throw new LlmError(`LLM 返回的 tool_calls[${index}] 字段无效`);
+      }
+      return {
+        id: call.id,
+        type: 'function',
+        function: { name: fn.name, arguments: fn.arguments }
+      };
+    });
+  }
+
+  function toWireMessage(message: ChatMessage): Record<string, unknown> {
+    const { toolCallId, toolCalls, ...wire } = message;
+    return {
+      ...wire,
+      ...(toolCallId !== undefined ? { tool_call_id: toolCallId } : {}),
+      ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {})
+    };
+  }
+
+  function buildBody(messages: ChatMessage[], stream: boolean, options?: ChatCallOptions): string {
+    const body: Record<string, unknown> = {
+      model,
+      stream,
+      messages: messages.map(toWireMessage)
+    };
+    if (options?.maxTokens !== undefined) body.max_tokens = options.maxTokens;
+    if (options?.tools?.length) body.tools = options.tools;
+    if (options?.toolChoice !== undefined) body.tool_choice = options.toolChoice;
     return JSON.stringify(body);
   }
 
@@ -93,7 +146,7 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
     const onAbort = () => timeoutCtrl.abort(signal?.reason);
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      return await fetch(`${baseUrl}/v1/chat/completions`, {
+      return await fetch(endpoint, {
         method: 'POST',
         headers,
         body,
@@ -114,7 +167,7 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
   }
 
   async function chatOnce(messages: ChatMessage[], o?: ChatCallOptions): Promise<ChatResult> {
-    const body = buildBody(messages, false, o?.maxTokens);
+    const body = buildBody(messages, false, o);
     let last: Failure = { kind: 'retry', message: 'no attempt' };
 
     for (let attempt = 0; attempt <= RETRY_LIMIT; attempt++) {
@@ -141,13 +194,21 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
       }
 
       const json = (await res.json()) as {
-        choices?: { message?: { content?: string; reasoning_content?: string }; finish_reason?: string }[];
+        choices?: {
+          message?: {
+            content?: string | null;
+            reasoning_content?: string;
+            tool_calls?: unknown;
+          };
+          finish_reason?: string;
+        }[];
       };
       const msg = json.choices?.[0]?.message;
       return {
-        content: msg?.content ?? '',
+        content: typeof msg?.content === 'string' ? msg.content : '',
         reasoning: msg?.reasoning_content,
-        finishReason: json.choices?.[0]?.finish_reason
+        finishReason: json.choices?.[0]?.finish_reason,
+        toolCalls: parseToolCalls(msg?.tool_calls)
       };
     }
     throw toError(last);
@@ -158,7 +219,7 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
     handlers?: StreamHandlers,
     o?: ChatCallOptions
   ): Promise<ChatResult> {
-    const body = buildBody(messages, true, o?.maxTokens);
+    const body = buildBody(messages, true, o);
     let last: Failure = { kind: 'retry', message: 'no attempt' };
 
     for (let attempt = 0; attempt <= RETRY_LIMIT; attempt++) {
@@ -204,6 +265,7 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
     let content = '';
     let reasoning: string | undefined;
     let finishReason: string | undefined;
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
     const cancel = () => reader.cancel().catch(() => undefined);
 
@@ -250,7 +312,16 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
           }
           let obj: {
             choices?: {
-              delta?: { content?: string; reasoning_content?: string };
+              delta?: {
+                content?: string;
+                reasoning_content?: string;
+                tool_calls?: {
+                  index?: number;
+                  id?: string;
+                  type?: string;
+                  function?: { name?: string; arguments?: string };
+                }[];
+              };
               finish_reason?: string;
             }[];
           };
@@ -270,6 +341,19 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
             content += d.content;
             handlers?.onContentDelta?.(d.content);
           }
+          for (const delta of d?.tool_calls ?? []) {
+            const index = delta.index;
+            if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+              throw new LlmError('LLM 返回的流式 tool_call index 无效');
+            }
+            const current = toolCalls.get(index) ?? { id: '', name: '', arguments: '' };
+            if (delta.id !== undefined) current.id += delta.id;
+            if (delta.function?.name !== undefined) current.name += delta.function.name;
+            if (delta.function?.arguments !== undefined) {
+              current.arguments += delta.function.arguments;
+            }
+            toolCalls.set(index, current);
+          }
           if (choice.finish_reason) {
             finishReason = choice.finish_reason;
             return finish();
@@ -283,7 +367,19 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
     }
 
     function finish(): ChatResult {
-      return { content, reasoning, finishReason };
+      const calls = [...toolCalls.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([index, call]) => ({
+          id: call.id,
+          type: 'function' as const,
+          function: { name: call.name, arguments: call.arguments }
+        }));
+      return {
+        content,
+        reasoning,
+        finishReason,
+        ...(calls.length > 0 ? { toolCalls: parseToolCalls(calls) } : {})
+      };
     }
   }
 

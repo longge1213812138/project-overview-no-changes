@@ -9,6 +9,9 @@
  *   ① 意图解析（parse，失败兜底 chat）→ ② 动作（remember/forget + 日程 schedule_*，异常按 chat 继续）
  *   → ③ 记忆检索注入（top-8 + 动作确认语 / 日程注入，buildContext systemExtra）→ streamChat；
  *   回调累积本地 buffer 并广播 delta（content/reasoning 都发，渲染层自决定展示）。
+ * - 阶段 7 §5.7：runAgent 可带内置工具（仅 api 通道；web 明确 capabilityHint 不静默降级），
+ *   api 通道先做能力探测（agent-tools 按 baseUrl|model 缓存），需确认的工具走 60s 审批闭环
+ *   （agent-approval 广播 request/settled，生成 finally 统一 cancelAllPending）。
  * - 完成/中止/过期/其他错误 → updateMessage 保留已生成部分 + meta，广播 chatDone。
  * - 空闲抽取（§5.2 沉淀时机 2）：chatDone（ok 非中止）/再次发送 → 5 分钟单例定时器（extract.ts）。
  * - 广播统一走 windows.broadcast（主窗口 + 浮窗同步）。
@@ -25,13 +28,19 @@ import {
   MEMORY_TOP_K,
   createIntentParser,
   createMemoryStore,
+  createRegistryAuthorizer,
   createSessionStore,
   formatEventTime,
   formatMemoryBlock,
   relativeDayLabel,
+  runAgent,
   SessionExpiredError
 } from '@fairy/core'
 import type {
+  AgentAuthorize,
+  AgentRunOptions,
+  AgentTool,
+  AgentToolNotice,
   ChatBusyEvent,
   ChatDeltaEvent,
   ChatDoneEvent,
@@ -43,6 +52,8 @@ import type {
   SessionMeta,
   SessionStore
 } from '@fairy/core'
+import { cancelAllPending, requestApproval } from './agent-approval'
+import { getToolRegistry, initAgentTools, probeToolsSupportCached } from './agent-tools'
 import { resolveActiveChannel } from './channel'
 import type { ActiveChannel } from './channel'
 import { getEventStore } from './events'
@@ -66,6 +77,7 @@ let active: { sessionId: string; controller: AbortController } | null = null
 /** whenReady 调用，幂等 */
 export function initChat(): void {
   if (store) return
+  initAgentTools() // 阶段 7：建 %APPDATA%/fairy/workspace 并注册内置工具（幂等）
   const dbPath = join(app.getPath('userData'), 'fairy.db')
   store = createSessionStore({ dbPath })
   store.ensureQuickSession() // 浮窗固定快速会话（QUICK_SESSION_ID）
@@ -97,6 +109,7 @@ export function getMemoryStore(): MemoryStore {
 /** 退出前清理空闲抽取定时器（before-quit 调用，放 shutdownSidecar 旁边） */
 export function shutdownChat(): void {
   idleExtractor?.shutdown()
+  cancelAllPending('cancelled') // 阶段 7：退出时清掉悬挂审批
 }
 
 // ===== 会话 CRUD（ipc.ts handler 直调；session:changed 广播在此统一） =====
@@ -327,17 +340,70 @@ async function runGeneration(
 
   let content = ''
   let reasoning = ''
+  /** 阶段 7：本轮工具能力提示（通道不支持/未启用时随 chatDone 回传，非错误） */
+  let capabilityHint: string | undefined
 
   const emitDelta = (kind: ChatDeltaEvent['kind'], text: string): void => {
     broadcast(IPC.chatDelta, { sessionId, messageId, kind, text } satisfies ChatDeltaEvent)
   }
   const emitDone = (event: ChatDoneEvent): void => {
-    broadcast(IPC.chatDone, event)
+    // 阶段 7：有能力提示则附上（ok/aborted/error 各路径统一）
+    broadcast(IPC.chatDone, capabilityHint !== undefined ? { ...event, capabilityHint } : event)
   }
 
   try {
-    const result = await client.streamChat(
+    // ===== 阶段 7 §5.7 通道门控：tools 仅 API 通道；web 不做适配（明确提示，不静默降级） =====
+    let tools: AgentTool[] = []
+    let authorize: AgentAuthorize | undefined
+    if (resolved.channel === 'web') {
+      capabilityHint = '当前为 DeepSeek 网页通道，工具调用仅支持 API 通道，本轮未启用工具'
+      log.info('[agent]', capabilityHint)
+    } else {
+      // api：能力探测（同 baseUrl+model 只探测一次）；SessionExpiredError/LlmAuthError 不吞，
+      // 冒泡进下方既有 catch 分类（与 runAgent 同一 try）
+      const probe = await probeToolsSupportCached(client, resolved.capabilityKey, { signal })
+      if (probe.support === 'unsupported') {
+        capabilityHint = `当前 API 端点不支持工具调用（${probe.detail ?? '探测未通过'}），本轮未启用工具`
+        log.info('[agent]', capabilityHint)
+      } else {
+        // supported → 带工具；unknown → 同样带工具尝试（失败即可见错误，不算静默降级）
+        if (probe.support === 'unknown') {
+          log.info('[agent]', `能力探测未知（${probe.detail ?? '无详情'}），本轮带工具尝试`)
+        }
+        const registry = getToolRegistry()
+        tools = registry.list().map((r) => r.tool)
+        authorize = createRegistryAuthorizer(registry, {
+          confirm: (req) => requestApproval(req, { signal })
+        })
+      }
+    }
+
+    const agentOptions: AgentRunOptions = { signal }
+    // 不带工具时 authorize 不传（runtime 默认拒绝）；onToolEvent 仅带工具时挂（可观测）
+    if (authorize) agentOptions.authorize = authorize
+    if (tools.length > 0) {
+      agentOptions.onToolEvent = (e) => {
+        log.info('[tool]', e)
+        // AgentToolNotice 只有 error 字段：denied 的 reason 映射进去，其余状态原样
+        const notice: AgentToolNotice = {
+          sessionId,
+          id: e.id,
+          name: e.name,
+          status: e.status,
+          ...(e.status === 'denied'
+            ? { error: e.reason }
+            : e.status === 'failed'
+              ? { error: e.error }
+              : {})
+        }
+        broadcast(IPC.agentToolNotice, notice)
+      }
+    }
+
+    const result = await runAgent(
+      client,
       messages,
+      tools,
       {
         onContentDelta: (t) => {
           content += t
@@ -348,7 +414,7 @@ async function runGeneration(
           emitDelta('reasoning', t)
         }
       },
-      { signal }
+      agentOptions
     )
     const elapsedMs = Date.now() - startedAt
     s.updateMessage(messageId, {
@@ -357,7 +423,9 @@ async function runGeneration(
       meta: {
         elapsedMs,
         finishReason: result.finishReason ?? 'stop',
-        ...(reasoning ? { reasoning } : {})
+        ...(reasoning ? { reasoning } : {}),
+        // 阶段 7：能力提示落 meta，重开会话仍可见（否则只存活于当次 chatDone）
+        ...(capabilityHint !== undefined ? { capabilityHint } : {})
       }
     })
     emitDone({ sessionId, messageId, ok: true, elapsedMs })
@@ -390,6 +458,7 @@ async function runGeneration(
     s.updateMessage(messageId, { content, meta: { error: message } })
     emitDone({ sessionId, messageId, ok: false, error: message, elapsedMs })
   } finally {
+    cancelAllPending('cancelled') // 阶段 7：生成结束（含中止/报错）清掉悬挂审批
     active = null
     broadcast(IPC.chatBusy, { sessionId: null } satisfies ChatBusyEvent)
   }

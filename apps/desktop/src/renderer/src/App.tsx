@@ -1,6 +1,7 @@
 import { APP_NAME, FAIRY_VERSION, QUICK_SESSION_ID } from '@fairy/core'
 import { useCallback, useEffect, useState } from 'react'
 import SettingsTab from './SettingsTab'
+import ApprovalDialog from './agent/ApprovalDialog'
 import CalendarPanel from './calendar/CalendarPanel'
 import ChatPane from './chat/ChatPane'
 import SessionSidebar from './chat/SessionSidebar'
@@ -33,6 +34,8 @@ function FloatWindow() {
     <div className="float-shell">
       <ChatPane sessionId={QUICK_SESSION_ID} float />
       <div className="float-hint">Alt+Space 呼出/隐藏 · Esc 关闭</div>
+      {/* 阶段 7：浮窗也能弹审批（每窗口一个实例，避免重复订阅双响应） */}
+      <ApprovalDialog />
     </div>
   )
 }
@@ -83,6 +86,9 @@ function MainWindow() {
           </button>
         ))}
       </nav>
+
+      {/* 阶段 7：工具审批对话框（主窗一个实例；浮窗在 FloatWindow 内各自挂一次） */}
+      <ApprovalDialog />
     </div>
   )
 }
