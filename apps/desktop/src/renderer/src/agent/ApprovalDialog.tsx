@@ -122,10 +122,14 @@ export default function ApprovalDialog() {
         return alive.length === prev.length ? prev : alive
       })
     }, 5_000)
+    // 10s 定时对账兕底：任何事件丢失/IPC reject 被吞的路径，最迟 10s 自愈
+    //（GUI 验收实测：单靠事件触发的对账在某些窗口上未执行，陈旧框长期驻留）
+    const reconciler = setInterval(() => void syncFromMain(), 10_000)
     return () => {
       offApproval()
       offSettled()
       clearInterval(sweeper)
+      clearInterval(reconciler)
     }
   }, [syncFromMain])
 
@@ -148,10 +152,12 @@ export default function ApprovalDialog() {
             if (accepted !== true) void syncFromMain()
           })
           .catch(() => {
-            // preload 面未就绪：本地已移除，main 侧 60s 超时兜底
+            // preload 面异常/IPC reject：也对账（main 侧 60s 超时兜底仍在）
+            void syncFromMain()
           })
       } catch {
         // 同上
+        void syncFromMain()
       }
     },
     [syncFromMain]

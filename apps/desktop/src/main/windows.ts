@@ -26,12 +26,40 @@ function preloadPath(): string {
 }
 
 /**
- * 阶段 7：浮窗 Esc 豁免门。有待审工具审批时返回 true → Esc 交给 renderer 审批
- * 对话框（拒绝），不收起浮窗。由 agent-approval 模块注册（单向依赖，不成环）。
+ * 阶段 7：浮窗抑制门。有待审工具审批时返回 true →
+ * - Esc 交给 renderer 审批对话框（拒绝），不收起浮窗；
+ * - 失焦也不收起（否则审批框随浮窗隐藏，用户以为「没弹框」）。
+ * 由 agent-approval 模块注册（单向依赖，不成环）。
  */
-let escGate: (() => boolean) | null = null
-export function setFloatEscGate(fn: (() => boolean) | null): void {
-  escGate = fn
+let approvalGate: (() => boolean) | null = null
+export function setFloatApprovalGate(fn: (() => boolean) | null): void {
+  approvalGate = fn
+}
+
+/**
+ * 审批发起时主动把承载框的窗口带到前台（GUI 验收实测：请求渲染在后台窗口里
+ * 用户看不见，需要点托盘才能看到）。用户正在浮窗操作时就地展示不打断；
+ * 主窗被关闭过则重建（重建后的 renderer 挂载时经 getPendingApprovals 对账
+ * 拉回本请求，不会丢）。
+ */
+export function summonForApproval(): void {
+  if (floatWin && !floatWin.isDestroyed() && floatWin.isVisible() && floatWin.isFocused()) {
+    return // 用户正在浮窗操作：框就地展示
+  }
+  if (mainWin && !mainWin.isDestroyed()) {
+    if (mainWin.isMinimized()) mainWin.restore()
+    if (!mainWin.isVisible()) mainWin.show()
+    mainWin.focus()
+    return
+  }
+  void createMainWindow()
+}
+
+/** 审批结算后：浮窗若已失焦，按阶段 3「失焦收起」规格补收（审批期间被豁免） */
+export function releaseFloatIfBlurred(): void {
+  if (floatWin && !floatWin.isDestroyed() && floatWin.isVisible() && !floatWin.isFocused()) {
+    hideFloat()
+  }
 }
 
 export function getMainWindow(): BrowserWindow | null {
@@ -166,16 +194,20 @@ export async function createFloatWindow(): Promise<void> {
     if (floatWin === win) floatWin = null
   })
 
-  // 规格：Esc 收起（阶段 7 豁免：有待审工具审批时，Esc 优先给审批对话框作拒绝用）
+  // 规格：Esc 收起（阶段 7 豁免：有待审审批时，Esc 优先给审批对话框作拒绝用）
   win.webContents.on('before-input-event', (_event, input) => {
     if (input.type === 'keyDown' && input.key === 'Escape') {
-      if (escGate !== null && escGate()) return
+      if (approvalGate !== null && approvalGate()) return
       hideFloat()
     }
   })
 
-  // 规格：失焦收起（切到主窗口/其他应用都收）
-  win.on('blur', () => hideFloat())
+  // 规格：失焦收起（切到主窗口/其他应用都收）；审批 pending 期间豁免——
+  // 否则审批框随浮窗隐藏，用户以为「没弹框」（GUI 验收实测缺陷）
+  win.on('blur', () => {
+    if (approvalGate !== null && approvalGate()) return
+    hideFloat()
+  })
 
   // 网关状态补发（did-finish-load 时）
   sendStateOnFinishLoad(win.webContents)

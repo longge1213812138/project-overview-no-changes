@@ -20,7 +20,7 @@
  * - 聊天事件（delta/done/busy）与会话变化（session:changed）由 chat.ts 直接走 windows.broadcast
  * 托盘：login_failed → 红图标 + 异常 tooltip（tray 实例由 index.ts 创建后经 registerTray 注入）。
  */
-import { app, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron'
 import type { Tray } from 'electron'
 import { join } from 'node:path'
 import { IPC, APP_NAME, FAIRY_VERSION } from '@fairy/core'
@@ -44,6 +44,8 @@ import {
   stopChat
 } from './chat'
 import { getPendingApprovals, respondApproval } from './agent-approval'
+import { getFloatWindow, getMainWindow } from './windows'
+import { log } from './logger'
 import { getEventStore } from './events'
 import { broadcast } from './windows'
 import { configureGateway, getGatewayState, onGatewayStateChanged } from './sidecar'
@@ -254,9 +256,17 @@ export function registerIpcHandlers(): void {
   })
 
   // ===== 阶段 7：工具审批（IPC 边界校验 → agent-approval 结算；返回是否受理供 renderer 对账） =====
-  ipcMain.handle(IPC.agentApprovalRespond, (_event, id: unknown, approved: unknown) => {
+  ipcMain.handle(IPC.agentApprovalRespond, (event, id: unknown, approved: unknown) => {
     if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('id 必须为有限数字')
     if (typeof approved !== 'boolean') throw new Error('approved 必须为布尔值')
+    // 诊断：记录提交来自哪个窗口（GUI 验收排查陈旧点击/多窗不一致的关键线索）
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const from =
+      owner === getMainWindow() ? 'main' : owner === getFloatWindow() ? 'float' : owner ? 'other' : 'gone'
+    log.info(
+      '[approval]',
+      `respond id=${id} approved=${approved} from=${from}(wc${event.sender.id})`
+    )
     return respondApproval(id, approved)
   })
   /** 权威对账：renderer 挂载/新请求到达/提交被忽略时拉取真正 pending 的审批 */

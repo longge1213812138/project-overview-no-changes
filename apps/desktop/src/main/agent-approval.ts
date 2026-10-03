@@ -13,7 +13,14 @@
 import { IPC } from '@fairy/core'
 import type { AgentApprovalRequest, AgentApprovalSettledEvent } from '@fairy/core'
 import { log } from './logger'
-import { broadcast, setFloatEscGate } from './windows'
+import {
+  broadcast,
+  getFloatWindow,
+  getMainWindow,
+  releaseFloatIfBlurred,
+  setFloatApprovalGate,
+  summonForApproval
+} from './windows'
 
 /** 审批超时（毫秒）：超时未决策 → 拒绝并 settled{reason:'timeout'} */
 const APPROVAL_TIMEOUT_MS = 60_000
@@ -32,8 +39,15 @@ const pending = new Map<number, PendingApproval>()
 /** 自增审批 id（模块级单例；renderer 回传的 id 必须来自这里） */
 let seq = 0
 
-// 阶段 7：有待审审批时浮窗 Esc 不收窗（Esc = 审批对话框的拒绝键）
-setFloatEscGate(() => pending.size > 0)
+/** 窗口可见性描述（诊断日志用） */
+function describeWin(win: Electron.BrowserWindow | null): string {
+  if (!win || win.isDestroyed()) return 'gone'
+  if (!win.isVisible()) return 'hidden'
+  return win.isFocused() ? 'focused' : 'visible-blurred'
+}
+
+// 阶段 7：有待审审批时浮窗不收（Esc=拒绝键、失焦也不藏框）
+setFloatApprovalGate(() => pending.size > 0)
 
 /**
  * 结算一条 pending（幂等）：出 map → 清 timer/abort listener → resolve →
@@ -55,6 +69,8 @@ function settle(id: number, approved: boolean, reason?: 'timeout' | 'cancelled')
     ...(reason !== undefined ? { reason } : {})
   }
   broadcast(IPC.agentApprovalSettled, event)
+  // 审批期间浮窗被豁免失焦收起：结算后若已失焦则补收（恢复阶段 3 规格行为）
+  releaseFloatIfBlurred()
   log.info(
     '[approval]',
     `结算 id=${id} tool=${entry.request.tool.name} risk=${entry.request.tool.risk} ` +
@@ -87,7 +103,9 @@ export function requestApproval(
       '[approval]',
       `请求 id=${id} tool=${request.tool.name} risk=${request.tool.risk} ` +
         `source=${request.tool.source} outside=${request.outside}` +
-        `${request.reason !== undefined ? ` reason=${request.reason}` : ''}`
+        `${request.reason !== undefined ? ` reason=${request.reason}` : ''}` +
+        // 诊断：发起时两窗可见性（GUI 验收「没弹框」排查：框渲染在了哪个窗、当时可见吗）
+        ` | main=${describeWin(getMainWindow())} float=${describeWin(getFloatWindow())}`
     )
 
     // 发起时已中止：不打扰 renderer（请求也不广播），直接按取消结算
@@ -95,6 +113,9 @@ export function requestApproval(
       settle(id, false, 'cancelled')
       return
     }
+    // 主动召唤：审批是阻塞工具循环的模态决策，必须确保承载框的窗口在前台
+    // （GUI 验收实测：请求渲染在后台窗口里看不见，用户要点托盘才看到）
+    summonForApproval()
     signal?.addEventListener('abort', onAbort, { once: true })
     broadcast(IPC.agentApprovalRequest, request)
   })
