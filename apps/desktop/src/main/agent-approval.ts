@@ -121,6 +121,15 @@ export function requestApproval(
     // 双保险：紧跟着发一条独立的对账指令。两条事件任一到达 renderer 都会
     // 拿到权威队列（request 负责入队展示、syncReq 负责校准），单条丢失自愈
     broadcast(IPC.agentApprovalSyncReq)
+    // 三保险：延迟 500ms 再发一次 syncReq。覆盖 renderer 正在重建（HMR / 窗口重建）
+    // 导致前两条广播丢失的场景——延迟到达时 renderer 已挂载、IPC 监听已就绪。
+    // （GUI 验收实测：第二次审批框不弹，根因 = 广播在 renderer 挂载前发出）
+    setTimeout(() => {
+      if (pending.has(id)) {
+        log.info('[approval]', `延迟对账 id=${id}（500ms 后补发 syncReq）`)
+        broadcast(IPC.agentApprovalSyncReq)
+      }
+    }, 500)
   })
 }
 

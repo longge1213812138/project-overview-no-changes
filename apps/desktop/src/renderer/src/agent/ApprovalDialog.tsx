@@ -79,6 +79,8 @@ export default function ApprovalDialog() {
     if (!agent?.getPendingApprovals) return
     try {
       const alive = await agent.getPendingApprovals()
+      // 诊断日志：对账结果（GUI 验收第四轮排查）
+      console.log('[ApprovalDialog] syncFromMain: alive ids =', alive.map((r) => r.id), 'queue ids =', queueRef.current.map((i) => i.request.id))
       setQueue((prev) => {
         const now = Date.now()
         const freshAlive = alive
@@ -107,6 +109,8 @@ export default function ApprovalDialog() {
     const agent = window.fairy?.agent
     if (!agent?.onApproval || !agent.onApprovalSettled) return
     const offApproval = agent.onApproval((req: AgentApprovalRequest) => {
+      // 诊断日志：确认 renderer 是否收到审批请求（GUI 验收第四轮排查）
+      console.log('[ApprovalDialog] onApproval received:', req.id, req.tool.name)
       setQueue((prev) =>
         handledRef.current.has(req.id) || prev.some((i) => i.request.id === req.id)
           ? prev
@@ -120,7 +124,10 @@ export default function ApprovalDialog() {
       setQueue((prev) => prev.filter((i) => i.request.id !== e.id))
     })
     // 对账指令：main summon 后的双保险事件（request 可能单条丢失，任一到达即可校准）
-    const offSyncReq = agent.onSyncRequest?.(() => void syncFromMain())
+    const offSyncReq = agent.onSyncRequest?.(() => {
+      console.log('[ApprovalDialog] onSyncRequest received')
+      void syncFromMain()
+    })
     // 挂载对账：覆盖「订阅建立前广播」的请求/结算丢失（窗口晚加载、HMR 重载）
     void syncFromMain()
     // 65s 兜底过期：settled 广播丢失时的最后防线（main 60s 必然结算）
@@ -133,7 +140,8 @@ export default function ApprovalDialog() {
     }, 5_000)
     // 10s 定时对账兕底：任何事件丢失/IPC reject 被吞的路径，最迟 10s 自愈
     //（GUI 验收实测：单靠事件触发的对账在某些窗口上未执行，陈旧框长期驻留）
-    const reconciler = setInterval(() => void syncFromMain(), 10_000)
+    // 降至 3s：GUI 验收第四轮修复——第二次审批框不弹，缩短对账窗口加速自愈
+    const reconciler = setInterval(() => void syncFromMain(), 3_000)
     // 窗口被召唤到前台/重新可见时立即对账：summonForApproval 会 focus 本窗口，
     // 把「窗口到前台」与「渲染自愈」焊在一起——即便广播/定时器全部失效，
     // 只要窗口获得焦点就必拉回权威队列（GUI 验收实测的最后防线）
@@ -172,6 +180,8 @@ export default function ApprovalDialog() {
           handledIds: [...handledRef.current],
           from: window.location.search.includes('float=1') ? 'float' : 'main'
         }
+        // 诊断日志：提交审批决定（GUI 验收第四轮排查）
+        console.log('[ApprovalDialog] respond:', id, approved, 'snapshot:', snapshot)
         void window.fairy.agent
           .respondApproval(id, approved, snapshot)
           .then((accepted) => {

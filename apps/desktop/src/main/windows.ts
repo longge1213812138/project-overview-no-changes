@@ -41,6 +41,10 @@ export function setFloatApprovalGate(fn: (() => boolean) | null): void {
  * 用户看不见，需要点托盘才能看到）。用户正在浮窗操作时就地展示不打断；
  * 主窗被关闭过则重建（重建后的 renderer 挂载时经 getPendingApprovals 对账
  * 拉回本请求，不会丢）。
+ *
+ * 硬化（GUI 验收第四轮修复）：Windows 上 focus() 有时不触发 DOM focus 事件，
+ * 导致 renderer 的 onWindowFocus → syncFromMain 自愈链路失效。改用
+ * showInactive + moveTop + focus 三连 + 短暂置顶确保窗口真正到前台。
  */
 export function summonForApproval(): void {
   if (floatWin && !floatWin.isDestroyed() && floatWin.isVisible() && floatWin.isFocused()) {
@@ -49,6 +53,8 @@ export function summonForApproval(): void {
   if (mainWin && !mainWin.isDestroyed()) {
     if (mainWin.isMinimized()) mainWin.restore()
     if (!mainWin.isVisible()) mainWin.show()
+    // moveTop 确保窗口 Z 序到最前（Windows 上单纯 focus() 可能被其他窗口压住）
+    mainWin.moveTop()
     mainWin.focus()
     return
   }
