@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   ApiChannelConfig,
+  ApiStyle,
   ChannelKind,
   ChannelState,
   ConfigureResult,
@@ -43,6 +44,8 @@ export default function SettingsTab() {
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [model, setModel] = useState('')
+  /** 接口风格：chat = /v1/chat/completions（默认），responses = /v1/responses */
+  const [apiStyle, setApiStyle] = useState<ApiStyle>('chat')
   const [savingApi, setSavingApi] = useState(false)
   const [apiMsg, setApiMsg] = useState<Feedback | null>(null)
   const apiPrefilled = useRef(false)
@@ -84,12 +87,13 @@ export default function SettingsTab() {
     return off
   }, [refresh])
 
-  // 已配置 API → 预填 baseUrl/model（apiKey 恒空输入，留空 = 不修改）
+  // 已配置 API → 预填 baseUrl/model/style（apiKey 恒空输入，留空 = 不修改）
   useEffect(() => {
     if (!state || apiPrefilled.current) return
     apiPrefilled.current = true
     setBaseUrl(state.api.baseUrl ?? '')
     setModel(state.api.model ?? '')
+    setApiStyle(state.api.style ?? 'chat')
   }, [state])
 
   /** action 返回的 ChannelState 直接采用；缺 state 时回退重新拉取 */
@@ -111,7 +115,8 @@ export default function SettingsTab() {
       const cfg: ApiChannelConfig = {
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
-        model: model.trim()
+        model: model.trim(),
+        apiStyle
       }
       const res = await window.fairy.channel.saveApi(cfg)
       applyState(res.state, refresh)
@@ -331,7 +336,8 @@ export default function SettingsTab() {
           <h3>OpenAI 兼容 API 配置</h3>
           <p className="section-hint">
             可接官方 DeepSeek API（Base URL 默认 https://api.deepseek.com/v1，模型默认 deepseek-chat）
-            或任意 OpenAI 兼容端点；保存即启用，不启动本地网关。
+            或任意 OpenAI 兼容端点；接口风格支持 Chat Completions（/v1/chat/completions）与
+            Responses（/v1/responses）两种；保存即启用，不启动本地网关。
           </p>
           <form
             className="setting-form"
@@ -371,6 +377,15 @@ export default function SettingsTab() {
                 placeholder="deepseek-chat"
                 autoComplete="off"
               />
+            </div>
+            <div>
+              <label title="同一 Base URL 的两种 OpenAI 兼容接口：Chat Completions 或 Responses">
+                接口风格
+              </label>
+              <select value={apiStyle} onChange={(e) => setApiStyle(e.target.value as ApiStyle)}>
+                <option value="chat">Chat Completions（…/v1/chat/completions）</option>
+                <option value="responses">Responses（…/v1/responses）</option>
+              </select>
             </div>
             <div>
               <button type="submit" className="btn btn-primary" disabled={savingApi}>
@@ -1007,7 +1022,8 @@ function ChannelStatusBar({ state }: { state: ChannelState }) {
       <div className="status-card card-green channel-status">
         <p className="card-title">
           当前通道：OpenAI 兼容 API · {state.api.baseUrl || '（未填 Base URL）'} ·{' '}
-          {state.api.model || '（未填模型）'}
+          {state.api.model || '（未填模型）'} ·{' '}
+          {state.api.style === 'responses' ? 'Responses（/v1/responses）' : 'Chat Completions'}
         </p>
       </div>
     )

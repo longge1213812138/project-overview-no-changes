@@ -1,5 +1,11 @@
 import { LlmAuthError, LlmError, SessionExpiredError } from './errors';
+import {
+  buildResponsesBody,
+  createResponsesAccumulator,
+  parseResponsesResult
+} from './responses';
 import type {
+  ApiStyle,
   ChatCallOptions,
   ChatMessage,
   ChatResult,
@@ -35,15 +41,31 @@ function isAbort(e: unknown, signal?: AbortSignal): boolean {
   return (e instanceof DOMException && e.name === 'AbortError') || signal?.aborted === true;
 }
 
+/**
+ * 端点归一（阶段 7 E2E 发现的真实配置形态 + 接口风格扩展）：
+ * - 已是完整方法路径（…/chat/completions 或 …/responses）→ 按风格**换/保后缀**，绝不二次拼接；
+ * - 以版本段结尾（…/v1、…/v2）→ 直接接方法名（修复 `…/v1` 再拼出 `…/v1/v1/…` 的隐患）；
+ * - 根地址（网关 http://127.0.0.1:port 等）→ 补 `/v1/<方法>`。
+ * 例：baseUrl `https://api.deepseek.com/v1` + responses → `https://api.deepseek.com/v1/responses`。
+ */
+export function resolveEndpoint(baseUrl: string, style: ApiStyle): string {
+  const clean = baseUrl.replace(/\/+$/, '');
+  const method = style === 'responses' ? 'responses' : 'chat/completions';
+  if (/\/chat\/completions$/.test(clean)) {
+    return style === 'chat' ? clean : `${clean.replace(/\/chat\/completions$/, '')}/responses`;
+  }
+  if (/\/responses$/.test(clean)) {
+    return style === 'responses' ? clean : `${clean.replace(/\/responses$/, '')}/chat/completions`;
+  }
+  if (/\/v\d+$/.test(clean)) return `${clean}/${method}`;
+  return `${clean}/v1/${method}`;
+}
+
 export function createLlmClient(opts: LlmClientOptions): LlmClient {
   const baseUrl = opts.baseUrl.replace(/\/+$/, '');
-  /**
-   * 端点归一（阶段 7 E2E 发现的真实配置形态）：用户可能按供应商示例把 baseUrl
-   * 填成完整路径（…/v1/chat/completions），此时不得再二次拼接，否则 404。
-   */
-  const endpoint = /\/(v\d+\/)?chat\/completions$/.test(baseUrl)
-    ? baseUrl
-    : `${baseUrl}/v1/chat/completions`;
+  const style: ApiStyle = opts.apiStyle ?? 'chat';
+  const endpoint = resolveEndpoint(baseUrl, style);
+  const isResponses = style === 'responses';
   const model = opts.model ?? 'default';
   const requestTimeoutMs = opts.requestTimeoutMs ?? 60_000;
   const idleTimeoutMs = opts.idleTimeoutMs ?? 30_000;
@@ -94,6 +116,15 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
   }
 
   function buildBody(messages: ChatMessage[], stream: boolean, options?: ChatCallOptions): string {
+    // Responses 风格：协议映射在 responses.ts（input 项/扁平 tools/max_output_tokens）
+    if (isResponses) {
+      return buildResponsesBody({
+        model,
+        messages,
+        stream,
+        ...(options !== undefined ? { options } : {})
+      });
+    }
     const body: Record<string, unknown> = {
       model,
       stream,
@@ -193,21 +224,24 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
         continue;
       }
 
-      const json = (await res.json()) as {
-        choices?: {
-          message?: {
-            content?: string | null;
-            reasoning_content?: string;
-            tool_calls?: unknown;
-          };
-          finish_reason?: string;
-        }[];
-      };
-      const msg = json.choices?.[0]?.message;
+      const json = (await res.json()) as unknown;
+      if (isResponses) return parseResponsesResult(json);
+      const msg = (
+        json as {
+          choices?: {
+            message?: {
+              content?: string | null;
+              reasoning_content?: string;
+              tool_calls?: unknown;
+            };
+            finish_reason?: string;
+          }[];
+        }
+      ).choices?.[0]?.message;
       return {
         content: typeof msg?.content === 'string' ? msg.content : '',
         reasoning: msg?.reasoning_content,
-        finishReason: json.choices?.[0]?.finish_reason,
+        finishReason: (json as { choices?: { finish_reason?: string }[] }).choices?.[0]?.finish_reason,
         toolCalls: parseToolCalls(msg?.tool_calls)
       };
     }
@@ -249,23 +283,33 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
       }
 
       // 已进入流：不再重试（避免回调重复投递），错误直接抛出
+      if (isResponses) {
+        // Responses：事件帧累计（responses.ts）；response.completed|failed|incomplete 终止
+        const accumulator = createResponsesAccumulator(handlers);
+        await consumeSse(res, o?.signal, (payload) =>
+          accumulator.push(payload) ? 'stop' : 'continue'
+        );
+        return accumulator.finish();
+      }
       return await readSseStream(res, handlers, o?.signal);
     }
     throw toError(last);
   }
 
-  async function readSseStream(
+  /**
+   * 通用 SSE 行读取（两种接口风格共用；行为与阶段 2 原实现一致）：
+   * 跨 chunk 半行缓冲、只认 `data:` 帧（`event:` 行/空行/注释忽略）、
+   * chunk 间 idle 超时抛错、用户中止 cancel reader、连接关闭自然结束；
+   * onPayload 返回 'stop' → 停止读取（finally 照常回收 reader 与监听）。
+   */
+  async function consumeSse(
     res: Response,
-    handlers?: StreamHandlers,
-    signal?: AbortSignal
-  ): Promise<ChatResult> {
+    signal: AbortSignal | undefined,
+    onPayload: (payload: string) => 'continue' | 'stop'
+  ): Promise<void> {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    let content = '';
-    let reasoning: string | undefined;
-    let finishReason: string | undefined;
-    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
     const cancel = () => reader.cancel().catch(() => undefined);
 
@@ -304,83 +348,97 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
         while ((nl = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, nl).replace(/\r$/, '');
           buf = buf.slice(nl + 1);
-          if (!line.startsWith('data:')) continue; // 忽略空行/注释行
+          if (!line.startsWith('data:')) continue; // 忽略空行/注释行/event: 行
           const payload = line.slice(5).trim();
-          if (payload === '[DONE]') {
-            finishReason = finishReason ?? 'stop';
-            return finish();
-          }
-          let obj: {
-            choices?: {
-              delta?: {
-                content?: string;
-                reasoning_content?: string;
-                tool_calls?: {
-                  index?: number;
-                  id?: string;
-                  type?: string;
-                  function?: { name?: string; arguments?: string };
-                }[];
-              };
-              finish_reason?: string;
-            }[];
-          };
-          try {
-            obj = JSON.parse(payload);
-          } catch {
-            continue; // 防御：残缺帧跳过
-          }
-          const choice = obj.choices?.[0];
-          if (!choice) continue;
-          const d = choice.delta;
-          if (d?.reasoning_content) {
-            reasoning = (reasoning ?? '') + d.reasoning_content;
-            handlers?.onReasoningDelta?.(d.reasoning_content);
-          }
-          if (d?.content) {
-            content += d.content;
-            handlers?.onContentDelta?.(d.content);
-          }
-          for (const delta of d?.tool_calls ?? []) {
-            const index = delta.index;
-            if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
-              throw new LlmError('LLM 返回的流式 tool_call index 无效');
-            }
-            const current = toolCalls.get(index) ?? { id: '', name: '', arguments: '' };
-            if (delta.id !== undefined) current.id += delta.id;
-            if (delta.function?.name !== undefined) current.name += delta.function.name;
-            if (delta.function?.arguments !== undefined) {
-              current.arguments += delta.function.arguments;
-            }
-            toolCalls.set(index, current);
-          }
-          if (choice.finish_reason) {
-            finishReason = choice.finish_reason;
-            return finish();
-          }
+          if (onPayload(payload) === 'stop') return;
         }
       }
-      return finish();
     } finally {
       signal?.removeEventListener('abort', onAbort);
       void cancel();
     }
+  }
 
-    function finish(): ChatResult {
-      const calls = [...toolCalls.entries()]
-        .sort(([left], [right]) => left - right)
-        .map(([index, call]) => ({
-          id: call.id,
-          type: 'function' as const,
-          function: { name: call.name, arguments: call.arguments }
-        }));
-      return {
-        content,
-        reasoning,
-        finishReason,
-        ...(calls.length > 0 ? { toolCalls: parseToolCalls(calls) } : {})
+  /** Chat Completions 流式解析（行为与阶段 2 原实现一致，建立在 consumeSse 之上） */
+  async function readSseStream(
+    res: Response,
+    handlers?: StreamHandlers,
+    signal?: AbortSignal
+  ): Promise<ChatResult> {
+    let content = '';
+    let reasoning: string | undefined;
+    let finishReason: string | undefined;
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+
+    await consumeSse(res, signal, (payload) => {
+      if (payload === '[DONE]') {
+        finishReason = finishReason ?? 'stop';
+        return 'stop' as const;
+      }
+      let obj: {
+        choices?: {
+          delta?: {
+            content?: string;
+            reasoning_content?: string;
+            tool_calls?: {
+              index?: number;
+              id?: string;
+              type?: string;
+              function?: { name?: string; arguments?: string };
+            }[];
+          };
+          finish_reason?: string;
+        }[];
       };
-    }
+      try {
+        obj = JSON.parse(payload);
+      } catch {
+        return 'continue' as const; // 防御：残缺帧跳过
+      }
+      const choice = obj.choices?.[0];
+      if (!choice) return 'continue' as const;
+      const d = choice.delta;
+      if (d?.reasoning_content) {
+        reasoning = (reasoning ?? '') + d.reasoning_content;
+        handlers?.onReasoningDelta?.(d.reasoning_content);
+      }
+      if (d?.content) {
+        content += d.content;
+        handlers?.onContentDelta?.(d.content);
+      }
+      for (const delta of d?.tool_calls ?? []) {
+        const index = delta.index;
+        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+          throw new LlmError('LLM 返回的流式 tool_call index 无效');
+        }
+        const current = toolCalls.get(index) ?? { id: '', name: '', arguments: '' };
+        if (delta.id !== undefined) current.id += delta.id;
+        if (delta.function?.name !== undefined) current.name += delta.function.name;
+        if (delta.function?.arguments !== undefined) {
+          current.arguments += delta.function.arguments;
+        }
+        toolCalls.set(index, current);
+      }
+      if (choice.finish_reason) {
+        finishReason = choice.finish_reason;
+        return 'stop' as const;
+      }
+      return 'continue' as const;
+    });
+
+    const calls = [...toolCalls.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, call]) => ({
+        id: call.id,
+        type: 'function' as const,
+        function: { name: call.name, arguments: call.arguments }
+      }));
+    return {
+      content,
+      reasoning,
+      finishReason,
+      ...(calls.length > 0 ? { toolCalls: parseToolCalls(calls) } : {})
+    };
   }
 
   return { chatOnce, streamChat };

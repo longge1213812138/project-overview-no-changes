@@ -236,7 +236,8 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 ### 5.6 通道选择（OpenAI 兼容 API / DeepSeek 网页）
 
 1. **启动不自动登录（硬规则）**：应用启动不 spawn 网关、不发生任何 DeepSeek 网页登录；是否联网、走哪条通道由用户在设置页显式决定。
-2. **通道持久化**：`config.json` 增加 `channel: 'api' | 'web' | null` 与 `api: { baseUrl, apiKey, model }`。
+2. **通道持久化**：`config.json` 增加 `channel: 'api' | 'web' | null` 与 `api: { baseUrl, apiKey, model, apiStyle }`。
+   - **接口风格 `apiStyle: 'chat' | 'responses'`（2026-10-05 用户要求）**：`chat`（默认）走 Chat Completions（`POST …/v1/chat/completions`）；`responses` 走 Responses API（`POST …/v1/responses`）。端点归一：完整方法路径按风格**换/保后缀**不二次拼接、`…/v1` 版本段直接接方法名、根地址补 `/v1/<方法>`；协议差异（`input` 项数组 / 扁平 tools / `max_output_tokens` / 事件流 `type` 帧）全部收敛在 `core/llm/responses.ts`，重试、超时、错误分类、SSE 行读取与 chat 风格共用（`client.ts` 抽出 `consumeSse`）；工具调用、能力探测、意图解析、cron 均自动跟随该风格，探测缓存键含风格不串扰。配置存 `config.json api.apiStyle`（老配置缺省归一为 chat）。
    - `channel = null`（首启/本节上线后升级）→ 设置页展示双通道选择卡：
    - **OpenAI 兼容 API**：baseUrl（默认 `https://api.deepseek.com/v1`）+ API Key + model（默认 `deepseek-chat`）→ 保存即启用；聊天/意图/抽取全部直连该端点，不启动网关（可接官方 DeepSeek API 或任意 OpenAI 兼容端点）。
    - **DeepSeek 网页**：走 §5.5 账号引导流；选中后需点击「启动网关」才 spawn+登录，**每次启动 Fairy 均需手动点一次**（启动后会话期间保持运行）。

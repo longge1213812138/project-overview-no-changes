@@ -4,6 +4,7 @@
  */
 
 import type { AgentApprovalRequest, AgentToolNotice, ToolRisk } from './agent/registry';
+import type { ApiStyle } from './llm/types';
 
 /** DeepSeek 账号配置（v0.2.11 账号池模式，明文存 %APPDATA%/fairy/config.json，阶段 6 上 DPAPI） */
 export interface GatewayAccountConfig {
@@ -563,13 +564,18 @@ export interface ApiChannelConfig {
   apiKey: string;
   /** 如 deepseek-chat / gpt-4o-mini */
   model: string;
+  /**
+   * 接口风格：'chat'（默认，POST …/v1/chat/completions）或
+   * 'responses'（POST …/v1/responses）。缺省按 'chat' 归一。
+   */
+  apiStyle?: ApiStyle;
 }
 
 export interface ChannelState {
   /** null = 尚未选择（首启/升级后，设置页展示双通道选择卡） */
   channel: ChannelKind | null;
-  /** api 通道配置概况（不含 apiKey 明文） */
-  api: { configured: boolean; baseUrl: string; model: string };
+  /** api 通道配置概况（不含 apiKey 明文；style = 接口风格） */
+  api: { configured: boolean; baseUrl: string; model: string; style: ApiStyle };
   web: {
     /** DeepSeek 账号是否已配置（不回显明文） */
     accountConfigured: boolean;

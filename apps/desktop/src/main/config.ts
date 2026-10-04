@@ -72,7 +72,7 @@ export interface McpServerConfig {
 interface PlaintextConfig {
   gatewayBin?: string
   channel?: ChannelKind | null
-  api?: { baseUrl: string; model: string }
+  api?: { baseUrl: string; model: string; style?: string }
   skills?: Record<string, SkillStateEntry>
   /** MCP 明文部分：env 一律剥离（进密件） */
   mcpServers?: { name: string; command: string; args: string[]; cwd?: string }[]
@@ -150,13 +150,24 @@ function normalizeAccount(v: unknown): GatewayAccountConfig | undefined {
   return out
 }
 
-/** api 三字段（baseUrl/apiKey/model）全为非空字符串才认；缺一即「api 未配置」（configured=false） */
-function normalizeApi(baseUrl: unknown, apiKey: unknown, model: unknown): ApiChannelConfig | undefined {
+/** api 字段（baseUrl/apiKey/model）全为非空字符串才认；缺一即「api 未配置」（configured=false）
+ *  style：'chat' | 'responses'，脏值/缺省一律归一为 'chat'（老配置升级自动落 chat） */
+function normalizeApi(
+  baseUrl: unknown,
+  apiKey: unknown,
+  model: unknown,
+  style: unknown
+): ApiChannelConfig | undefined {
   const b = typeof baseUrl === 'string' ? baseUrl.trim() : ''
   const k = typeof apiKey === 'string' ? apiKey.trim() : ''
   const m = typeof model === 'string' ? model.trim() : ''
   if (b === '' || k === '' || m === '') return undefined
-  return { baseUrl: b, apiKey: k, model: m }
+  return {
+    baseUrl: b,
+    apiKey: k,
+    model: m,
+    apiStyle: style === 'responses' ? 'responses' : 'chat'
+  }
 }
 
 /** skills 状态归一：仅接受 {enabled:boolean, fingerprint:string} 形状，脏数据丢弃 */
@@ -218,7 +229,7 @@ function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
   }
   if (plain.gatewayBin !== undefined && plain.gatewayBin !== '') cfg.gatewayBin = plain.gatewayBin
   if (secrets.account) cfg.account = secrets.account
-  const api = normalizeApi(plain.api?.baseUrl, secrets.apiApiKey, plain.api?.model)
+  const api = normalizeApi(plain.api?.baseUrl, secrets.apiApiKey, plain.api?.model, plain.api?.style)
   if (api) cfg.api = api
   const skills = normalizeSkills(plain.skills)
   if (skills) cfg.skills = skills
@@ -237,7 +248,13 @@ function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
 function strip(cfg: FairyConfig): PlaintextConfig {
   const plain: PlaintextConfig = { channel: cfg.channel ?? null }
   if (cfg.gatewayBin) plain.gatewayBin = cfg.gatewayBin
-  if (cfg.api) plain.api = { baseUrl: cfg.api.baseUrl, model: cfg.api.model }
+  if (cfg.api) {
+    plain.api = {
+      baseUrl: cfg.api.baseUrl,
+      model: cfg.api.model,
+      style: cfg.api.apiStyle ?? 'chat' // 显式落盘（接口风格是非敏感配置）
+    }
+  }
   if (cfg.skills && Object.keys(cfg.skills).length > 0) plain.skills = cfg.skills
   if (cfg.mcpServers && cfg.mcpServers.length > 0) {
     // env 一律剥离（进密件），明文只留连接参数
@@ -312,7 +329,8 @@ export function loadConfig(): FairyConfig {
           typeof legacyApi === 'object' && legacyApi !== null
             ? {
                 baseUrl: typeof legacyApi['baseUrl'] === 'string' ? legacyApi['baseUrl'] : '',
-                model: typeof legacyApi['model'] === 'string' ? legacyApi['model'] : ''
+                model: typeof legacyApi['model'] === 'string' ? legacyApi['model'] : '',
+                style: typeof legacyApi['style'] === 'string' ? legacyApi['style'] : undefined
               }
             : undefined,
         skills: normalizeSkills(o['skills']),

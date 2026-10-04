@@ -13,6 +13,7 @@
 import { createLlmClient, LlmAuthError, SessionExpiredError } from '@fairy/core'
 import type {
   ApiChannelConfig,
+  ApiStyle,
   ChannelActionResult,
   ChannelKind,
   ChannelState,
@@ -37,13 +38,25 @@ export function getChannelState(): ChannelState {
   return {
     channel: cfg.channel ?? null,
     api: cfg.api
-      ? { configured: true, baseUrl: cfg.api.baseUrl, model: cfg.api.model }
-      : { configured: false, baseUrl: '', model: '' },
+      ? {
+          configured: true,
+          baseUrl: cfg.api.baseUrl,
+          model: cfg.api.model,
+          style: cfg.api.apiStyle ?? 'chat'
+        }
+      : { configured: false, baseUrl: '', model: '', style: 'chat' },
     web: {
       accountConfigured: cfg.account !== undefined,
       gateway: getGatewayState()
     }
   }
+}
+
+/** 接口风格归一：缺省 'chat'，非法值报错（fail-visible，不静默改写用户选择） */
+function normalizeApiStyle(value: unknown): ApiStyle | { error: string } {
+  if (value === undefined || value === null || value === '') return 'chat'
+  if (value === 'chat' || value === 'responses') return value
+  return { error: `接口风格仅支持 chat / responses：${String(value)}` }
 }
 
 /**
@@ -69,6 +82,8 @@ export async function saveApi(cfg: ApiChannelConfig): Promise<ChannelActionResul
     return { ok: false, error: `baseUrl 仅支持 http/https：${baseUrl}` }
   }
   if (model === '') return { ok: false, error: 'model 不能为空' }
+  const apiStyle = normalizeApiStyle(input.apiStyle)
+  if (typeof apiStyle === 'object') return { ok: false, error: apiStyle.error }
 
   const current = loadConfig()
   let key = apiKey
@@ -82,7 +97,7 @@ export async function saveApi(cfg: ApiChannelConfig): Promise<ChannelActionResul
   }
 
   try {
-    saveConfig({ ...current, channel: 'api', api: { baseUrl, apiKey: key, model } })
+    saveConfig({ ...current, channel: 'api', api: { baseUrl, apiKey: key, model, apiStyle } })
   } catch (err) {
     return { ok: false, error: `配置写入失败：${errMsg(err)}` }
   }
@@ -157,11 +172,18 @@ export function resolveActiveChannel(): ActiveChannel {
     if (!api) {
       return { ok: false, error: 'OpenAI API 配置不完整，请在设置页补充' }
     }
+    const apiStyle: ApiStyle = api.apiStyle ?? 'chat'
     return {
       ok: true,
       channel: 'api',
-      client: createLlmClient({ baseUrl: api.baseUrl, apiKey: api.apiKey, model: api.model }),
-      capabilityKey: `api:${api.baseUrl}|${api.model}`
+      client: createLlmClient({
+        baseUrl: api.baseUrl,
+        apiKey: api.apiKey,
+        model: api.model,
+        apiStyle
+      }),
+      // 探测缓存键含接口风格：同一端点两种风格的 tools 能力互不串扰
+      capabilityKey: `api:${apiStyle}:${api.baseUrl}|${api.model}`
     }
   }
 

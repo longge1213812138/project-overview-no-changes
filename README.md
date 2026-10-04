@@ -34,7 +34,8 @@ pnpm dev
 
 1. 设置页 → 「接入 OpenAI 兼容 API」；
 2. 官方 DeepSeek：Base URL `https://api.deepseek.com/v1`、Key 为你的 `sk-...`、模型 `deepseek-chat`；其他供应商按其文档填写；
-3. 「保存并启用」→ 下方「测试对话」验证 → 完成（全程不启动本地网关）。
+3. **接口风格**二选一（同一 Base URL 下的两种 OpenAI 兼容协议）：**Chat Completions**（默认，`…/v1/chat/completions`）或 **Responses**（`…/v1/responses`；Base URL 填根地址或完整方法路径均可，自动归一不二次拼接）；
+4. 「保存并启用」→ 下方「测试对话」验证 → 完成（全程不启动本地网关）。
 
 ### 通道 B：DeepSeek 网页（免费额度，需本地网关）
 
