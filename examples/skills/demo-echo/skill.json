@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "name": "demo-echo",
+  "version": "1.0.0",
+  "description": "演示技能：回显入参并报告执行环境（用于阶段 8 GUI 验收）",
+  "source": "local（Fairy 官方演示样例）",
+  "permissions": ["workspace:read"],
+  "tools": [
+    {
+      "name": "demo_echo",
+      "description": "回显传入的文本，并返回技能脚本看到的环境信息",
+      "risk": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 500, "description": "要回显的文本" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "entry": "tools/echo.js",
+      "timeoutMs": 5000
+    },
+    {
+      "name": "demo_bad_input",
+      "description": "故意要求 text 以 ok 开头，用于演示入参校验拒绝",
+      "risk": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "pattern": "^ok", "description": "必须以 ok 开头" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "entry": "tools/echo.js",
+      "timeoutMs": 5000
+    }
+  ]
+}

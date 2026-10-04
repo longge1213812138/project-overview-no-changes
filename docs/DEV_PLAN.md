@@ -376,6 +376,18 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 
 **验收**：获准 Skill/MCP 工具可调用并展示来源与所需权限；未启用/未授权扩展不可执行；错误、断连、无效 schema 与取消均清晰反馈且不泄露凭据。
 
+**实施备注（2026-10-04 已落地，代码完成待 GUI 人工验收）**：
+- **Skill 包格式**：`%APPDATA%/fairy/skills/<目录>/skill.json`（schemaVersion=1：name / version(semver) / description / **source 必填** / permissions / tools[{name, description, risk, inputSchema, entry, timeoutMs}]）。本地手工放置，**应用不提供任何网络安装路径**；未知顶层键/工具键、子集外 schema 关键字、非法 entry 路径（..、绝对路径、盘符、UNC、非 .js/.mjs/.cjs）→ **整包拒绝且错误可见**（fail-visible，绝不静默少校验）。
+- **信任/启用策略（§5.8 细化）**：新发现**默认禁用**；启用时记录内容指纹 `sha256(manifest + 各 entry 脚本)`，包内容一变即**自动回禁用**（标记「内容已变更」）需用户重新启用——供应链防篡改。状态存 config.json `skills` 明文字段（无凭据）；启用/禁用/重扫即时装配进统一 ToolRegistry 并广播 `skills:changed`。
+- **执行边界（如实声明，非 OS 级沙箱）**：entry 为 Node 脚本，经 **electron-as-node**（`ELECTRON_RUN_AS_NODE=1` 定向注入，与附录 C「意外继承」陷阱相反的刻意用法）`spawn` 执行：无 shell、cwd=工作区、最小 env + `FAIRY_SKILL_DIR/FAIRY_WORKSPACE_DIR/FAIRY_TOOL_NAME`、超时（1000–60000ms，默认 10s）、stdout+stderr 10 万字符截断、支持取消。**安全边界 = 默认禁用 + 指纹启用确认 + 每次调用审批（approval 恒 ask，v1 不提供 auto 通道）+ 进程管控**；凭据零注入（应用凭据永不进入子进程 env）。
+- **入参/结果契约**：`inputSchema` 必须 `type:"object"` 且只支持 JSON Schema 子集（type/properties/required/additionalProperties/items/minItems/maxItems/minLength/maxLength/minimum/maximum/enum/const/pattern；注解关键字忽略）——子集外关键字在加载期即拒绝。execute 前 assess+validateInput 双重校验（拒绝原因可见）。脚本协议：stdin 收一行 `{tool, input}` JSON → stdout 打印**单个 JSON 值**且退出码 0（调试输出走 stderr；非 JSON/非零退出/超时均抛可见错误）。
+- **审批/展示**：`definition.description` 尾部附 `来自 Skill「名 vX」· 来源 · 声明权限`（审批对话框与模型看到同一份来源信息）；`source='skill'` 显示「扩展」徽标。**权限声明是作者自述**，用于展示与启用认知，不构成运行时强制（无 OS 沙箱事实下唯一硬边界是逐次审批）。
+- **MCP stdio 客户端**：JSON-RPC 2.0 行协议（换行分隔）；连接 = spawn → initialize（protocolVersion 2024-11-05）→ notifications/initialized → tools/list，各 10s 超时；tools/call 60s 超时且支持取消（本地拒绝——外部进程副作用不可中断，正是必须逐次审批的原因）；收到服务端反向请求回 -32601 Method not found（不让服务端干等）；非法消息行/缓冲超限计入 `protocolIssues` 可见；意外退出 → state=error + stderr/exit code 可见 + `mcp:changed` 广播；断开/退出 **taskkill /T /F 树杀**防孤儿进程。
+- **MCP 工具策略**：**approval 恒 ask + risk 恒 exec**（外部服务能力不可验证，取最保守徽标，不给「只读」错觉）；入参按服务端 inputSchema **宽松校验**（我方子集生效、子集外关键字忽略——绝不因不支持而空校验）；返回值结构**严格校验**（content 块数组 / type 字符串 / text 块必须带 text / isError 布尔）。工具名与现有注册冲突 → 跳过该工具并记可见警告（连接不断；与 skill 整包拒绝语义区分：服务是长驻连接资源）。
+- **MCP 配置与凭据**：config.json 明文只存 name/command/args/cwd；**env（可能含 token）走 DPAPI 密件**（与 api.apiKey 同一模式），renderer 仅回显 KEY 名、日志/诊断天然无凭据。**用户驱动连接，不自动连接**任何外部进程（=「默认不把凭据交给未授权服务」）。子进程 env = 最小 env + **宿主 PATH**（外部命令发现需要，与内置 shell 工具刻意不同，此处明确声明）+ USERPROFILE/HOME + 配置 env；命令行不经 shell（Windows 下运行 npx/uvx 类脚本请显式配置 `cmd /c` 或 node 绝对路径）。
+- **入口隔离**：skill/mcp 全部执行面（`runSkillTool/discoverSkills/McpClient/buildMcpRegistrations/killTree` 等）只从 `@fairy/core` 完整入口导出，`entry-isolation.test.ts` 断言不进 index.web/renderer。
+- **测试**：skill 41 项（manifest 严格解析 / schema 子集 / 发现+指纹 / executor 真实子进程含超时取消截断 / builder 安全不变量 / 入口隔离）+ mcp 17 项（protocol 行编解码 / 假服务器 fixture 端到端：反向请求闸门、崩溃退出可见、超时、断连挂起拒绝、坏结构拒绝 / builder）。**GUI 验收样例**：`examples/skills/demo-echo`（技能包，含 README 验收步骤）与 `examples/mcp-demo-server.js`（演示 MCP 服务，注释含添加参数）。
+
 ### 阶段 9：cron 定时引擎
 
 1. 为重复任务与执行历史建模，采用确定性幂等 schema migration；定义时区/DST、错过触发、重启恢复、并发和失败策略。

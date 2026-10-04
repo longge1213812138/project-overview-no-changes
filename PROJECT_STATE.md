@@ -1,6 +1,6 @@
 # Fairy 项目交接材料
 
-> 交接编号：**H9**（H8 同对话前序快照）｜ 状态：**阶段 7 GUI 验收通过（第 5 轮复测 2026-10-04，「第二次审批框不弹」缺陷关闭，tag `m5`）；下一步 = MVP GUI/干净虚拟机验收收尾 → 阶段 8（Skill/MCP）→ 阶段 9（cron）** ｜ 更新时间：2026-10-04
+> 交接编号：**H10**（H8/H9 同对话前序快照）｜ 状态：**阶段 7 GUI 验收通过（tag `m5`）；阶段 8（Skill+MCP）代码完成、自动化验收全绿，GUI 人工验收待做（样例+清单见 §5 ⑤）；MVP GUI/干净虚拟机验收待做；下一步 = 阶段 8 GUI 验收 → 阶段 9（cron）** ｜ 更新时间：2026-10-04
 > 工作目录（绝对路径）：`C:\Users\91533\Desktop\Fairy`
 > **本次开发实际工作目录**：`C:\Users\91533\Desktop\Fairy.worktrees\project-overview-no-changes`（git worktree，main 分支）
 
@@ -9,7 +9,7 @@
 - **目标**：Fairy = Windows 桌面私人助手，以 **DeepSeek 网页版**（chat.deepseek.com 会话）为 LLM 后端，零 API 成本。MVP 范围 F1–F7 见 `docs/DEV_PLAN.md` §1。
 - **范围（MVP）**：聊天（流式）、多会话、"帮我记东西"、日程+托盘通知、FTS5 长期记忆、托盘/Alt+Space 浮窗/开机自启、登录引导流。
 - **MVP 后续范围（用户决定，2026-10-03）**：阶段 7–9：工具循环/Agent/本地 Shell、Skill、MCP、cron 定时引擎；**不做云同步和多用户**，产品保持本地单用户。
-- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/能力探测/审批 IPC/受控 Shell 代码完成并通过真实 API 端到端验收；**GUI 人工验收进行中：「第二次审批框不弹」缺陷经四轮修复（cf88e41/2dfdf7f/41948d7/50f9a22）复测仍失败后，快照诊断破案 = 审批 id 被 registry 负载 id 覆盖，根因修复已落（修复⑤+回归测试），第 5 轮复测待用户执行**。
+- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/审批 IPC/受控 Shell **GUI 验收已通过**（「第二次审批框不弹」四轮修复破案=审批 id 被 registry 负载 id 覆盖，修复⑤+回归测试钉死）。**阶段 8 Skill+MCP 代码完成（`5268007`/`0f4f13b`）+ 自动化验收全绿（282+3 单测），待 GUI 人工验收（§5 ⑤，样例 examples/）**；阶段 9 cron 未开始。
 - **git 位置**：历史（当前唯一提交 = 根提交 `b001520 "MVP"`，81 文件）：
   - `bf06919` 阶段 0：pnpm workspace + Electron 骨架 + 图标 + NSIS 打包通过
   - `b9932fe` docs：附录 C 本机环境备忘
@@ -77,14 +77,15 @@
 | 通道选择（§5.6，插入需求） | ✅ **完成（2026-09-27），待 GUI 验收** | 启动零登录烟测通过（12s 零 ds-free-api 进程/零端口）；channel=null 选择卡、API 表单（baseUrl/key/model）、网页通道需手点「启动网关」才登录、切 API 自动停网关、过期指纹按通道门控（仅 web 上报托盘红） |
 | 阶段 6 打包硬化 | ✅ **代码完成（2026-10-02），本机烟测通过，待干净虚拟机验收** | `electron-builder.yml`（NSIS+portable、extraResources 带网关二进制/双图标）+ `resources/installer.nsh`（安装选项页「开机自启」默认勾选，`/S` 也默认开；卸载清理 Run 键）+ `scripts/stage-extras.mjs`；凭据 DPAPI：`main/secrets.ts` + `config.ts` 重写（明文自动迁移、config.json 只剩非敏感字段）；日志 `main/logger.ts`（electron-log 按天滚动留 7 天 + 崩溃/子进程留痕）+ 诊断导出 `main/diagnostics.ts`（脱敏报告）+ 设置页「应用」区（自启开关/导出诊断/日志目录）+ `main/autostart.ts`。烟测：打包出 `Fairy Setup 0.0.1.exe`（112MB）+ `Fairy-0.0.1-portable.exe`（112MB）；静默安装→Run 键 `com.fairy.assistant` 写入→实机启动日志 `[autostart] openAtLogin=true`→静默卸载键/目录/卸载项全清；旧明文 config 自动迁移到 `secrets.dpapi.json`（protected:true，打包/开发两种上下文解密均成功），`config.json` 已无任何凭据；137 测试绿 + typecheck 绿 |
 | 阶段 7 Agent 工具运行时 | ✅ **代码完成（2026-10-03），待 GUI 人工验收** | core：`agent/runtime`（有界循环+授权决策 allowOutside/reason 穿透）、`agent/registry`（ToolRegistry + createRegistryAuthorizer，风险/审批/assess 策略，默认拒绝）、`agent/capability`（probeToolsSupport 两段探测三态）、`agent/tools`（pathguard 真实路径边界 + workspace_files + get_current_time + 受控 shell：白名单9命令/危险名单先查/spawn 无 shell/最小 env/输出截断）。main：`agent-approval.ts`（广播审批+60s超时拒绝+停止取消+全日志）、`agent-tools.ts`（workspace=%APPDATA%/fairy/workspace + 注册表装配 + 探测缓存）、chat 接线（通道门控+capabilityHint+toolNotice 广播）、浮窗 Esc 豁免。renderer：`ApprovalDialog`（队列/默认拒绝/Esc拒绝/越界红条）+ ChatPane 状态行/hint 灰条（落 meta 重开仍在）。证据：**227 单测 + 4 E2E 全绿、全仓 typecheck 绿、build 绿、bundle 实测无 OS 执行器、真实 agnes API 探测=supported(required)**。Shell 边界=白名单+路径边界+进程管控（**非 OS 级沙箱**，本机无原生依赖；DEV_PLAN 阶段 7 实施备注已如实声明）。**提交链**：`200da53`主体 → `cf88e41`/`2dfdf7f`/`41948d7`/`50f9a22` 审批框 GUI 缺陷四轮修复 → 修复⑤ 根因（审批 id 主权）+ 回归测试 3 项（详见 §5 ③ 进展实录）。 |
+| 阶段 8 Skill+MCP | ✅ **代码完成（2026-10-04），自动化验收全绿，待 GUI 人工验收** | core：`agent/skill`（skill.json 严格解析 fail-visible / 发现+内容指纹 sha256 / electron-as-node 执行器：无 shell+最小 env+超时截断可取消 / 装配）+ `agent/mcp`（JSON-RPC 2.0 行协议 / stdio 客户端生命周期 initialize→tools/list→call、反向请求回 -32601、意外退出可见、taskkill 树杀 / 装配）+ `skill/schema` 零依赖 JSON Schema 子集校验器；main：`skills.ts`（新发现默认禁用、内容变更自动回禁用、状态入 config.json）+ `mcp.ts`（配置明文、**env 走 DPAPI**、用户驱动连接、退出树杀）+ IPC/preload（skills:* 与 mcp:*）；renderer：设置页「技能」区 + 「MCP 服务器」区。安全不变量：skill/mcp **审批恒 ask**、mcp risk 恒 exec、权限/来源进审批描述；**入口隔离**（执行面不进 index.web，测试断言）。证据：**skill 41 + mcp 17 新增测试，全仓 282+3 单测 + typecheck + build 全绿**；GUI 样例 `examples/skills/demo-echo`（含验收 README）+ `examples/mcp-demo-server.js`。**提交链**：`5268007`（Skill）→ `0f4f13b`（MCP）。 |
 
-代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/SettingsTab + ApprovalDialog + 底部 tab。**尚未做**：阶段 7 GUI 人工验收（清单见 §5 ③）、MVP GUI 验收、干净虚拟机验收。
+代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7；skill/mcp，阶段 8——**仅完整入口，执行面不进 renderer**）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools/skills/mcp；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/SettingsTab（含技能区+MCP 区）+ ApprovalDialog + 底部 tab。**尚未做**：阶段 8 GUI 人工验收（清单见 §5 ⑤）、MVP GUI 验收、干净虚拟机验收、阶段 9。
 
 **已解决/已知事实**（原“未确认项”已全部落地）：ds-free-api v0.2.11 本机下载+运行 OK；账号池+device_id 登录 OK（应用侧凭据由 DPAPI 保护；网关运行配置含临时明文，停止/退出即删，勿入 git）。
 
 ## 5. 接续动作
 
-**当前并行事项**：① **【阻塞在用户侧】阶段 7 GUI 复测**：第 4 轮复测已执行=仍失败（2026-10-04 日志），但 `respond ... snapshot=` 快照诊断已破案——根因=审批 id 被 registry 负载 id 覆盖（详见 §5 ③）；根因修复（修复⑤）+回归测试已落，**第 5 轮复测待用户执行**：重启 `pnpm dev` → 连测两次 get_current_time/whoami → 第二次应自动弹框到前台、日志 respond id 与请求 id 一致；② MVP GUI/干净虚拟机验收（web 项等 10-11 解禁）：
+**当前并行事项**：① **【阻塞在用户侧】阶段 8 GUI 人工验收**（清单见 §5 ⑤，样例 `examples/skills/demo-echo` + `examples/mcp-demo-server.js`，需 `pnpm dev` 重启）；② MVP GUI/干净虚拟机验收（web 项等 10-11 解禁）；③ 验收通过后进入阶段 9（cron，§5 ④ 第 3 条）。
 
 **① GUI 验收清单（阶段 2/3/4/5 + 通道选择合并，DEV_PLAN §6 各阶段验收 + §9 M2/M3）**：
 1. `pnpm dev`（新终端，Node 24，`ELECTRON_RUN_AS_NODE` 未被继承）。
@@ -147,17 +148,12 @@
 9. 主窗与浮窗同时收到审批 → 任一窗口响应后另一窗对话框自动关闭（settled）。
 10. 生成中点「停止」→ 悬挂审批立即以 cancelled 关闭，无残留对话框。
 
-**注意事项**：**web 账号已被禁言（muted，2026-10-03 实测，至 2026-10-11 21:37）**——web 通道聊天验收需等解禁；阶段 7 工具测试不受影响（已定仅 API 通道）。**阶段 7 新增**：① Electron safeStorage 的 DPAPI 熵绑定 app name（dev/打包均 productName=Fairy 故互通；外部解密脚本必须 `app.setName('Fairy')`，见 scripts/unlock-e2e-config.cjs）；② E2E 复跑：`npx electron scripts/unlock-e2e-config.cjs` → `FAIRY_E2E_CONFIG=<路径> vitest run src/agent/e2e.api.test.ts`（key 不落日志）；③ LLM client endpoint 已归一（baseUrl 带完整 /v1/chat/completions 路径不再二次拼接）；④ shell 白名单/越界审批是当前唯一执行边界，扩白名单前先过 DEV_PLAN 阶段 7 实施备注的残余风险评估。通道选择遗留：`gateway:getState/configure/state` 通道名不在 IPC 常量表（兼容保留）；done/cancel 匹配依赖 title LIKE 关键词（模型分词质量影响命中）；通知单次触发（构造异常也 markFired 防刷屏）；空闲抽取是全局单例 5min 定时器；面板列表 limit 无分页（memory 200/events 500）；`.pi/` 已入 .gitignore；生成中切走再切回占位为空、bundle >500kB 等阶段 3 遗留仍有效；`electron-builder.yml` 已设 `npmRebuild: false`，阶段 6 打包需补 extraResources（红图标+网关二进制）。
+**注意事项**：**web 账号已被禁言（muted，2026-10-03 实测，至 2026-10-11 21:37）**——web 通道聊天验收需等解禁；阶段 7/8 工具测试不受影响（已定仅 API 通道）。**阶段 7 新增**：① Electron safeStorage 的 DPAPI 熵绑定 app name（dev/打包均 productName=Fairy 故互通；外部解密脚本必须 `app.setName('Fairy')`，见 scripts/unlock-e2e-config.cjs）；② E2E 复跑：`npx electron scripts/unlock-e2e-config.cjs` → `FAIRY_E2E_CONFIG=<路径> vitest run src/agent/e2e.api.test.ts`（key 不落日志）；③ LLM client endpoint 已归一（baseUrl 带完整 /v1/chat/completions 路径不再二次拼接）；④ shell 白名单/越界审批是当前唯一执行边界，扩白名单前先过 DEV_PLAN 阶段 7 实施备注的残余风险评估。通道选择遗留：`gateway:getState/configure/state` 通道名不在 IPC 常量表（兼容保留）；done/cancel 匹配依赖 title LIKE 关键词（模型分词质量影响命中）；通知单次触发（构造异常也 markFired 防刷屏）；空闲抽取是全局单例 5min 定时器；面板列表 limit 无分页（memory 200/events 500）；`.pi/` 已入 .gitignore；生成中切走再切回占位为空、bundle >500kB 等阶段 3 遗留仍有效；`electron-builder.yml` 已设 `npmRebuild: false`，阶段 6 打包需补 extraResources（红图标+网关二进制）。
 
 **④ 下一步开发计划（2026-10-04 拟定，按 DEV_PLAN v0.3 路线）**：
 
 1. **收尾（MVP 验收）**：MVP GUI 验收清单①剩余项补验（web 通道项等账号 2026-10-11 解禁）→ 干净虚拟机验收（清单第 8 条 = 阶段 6/M4）→ ~~tag 归位~~ ✅ **已执行（2026-10-04）**：`m1`/`m2`/`m3` 移至 `3b1dcd6`、补打 `m4`，与 `m5` 同点；剩余 = 试用反馈。
-2. **阶段 8（M6）：Skill 与 MCP**——建议先 Skill 后 MCP（Skill 走本地能力包，直接复用阶段 7 注册表/审批链；MCP 涉外部进程协议与凭据，风险面大）：
-   - Skill：基于阶段 7 工具契约实现发现、启用/禁用、版本与来源校验、权限声明、失败可见性；
-   - MCP：客户端生命周期、工具 schema/结果校验、连接配置与凭据最小权限管理；
-   - 全部扩展过统一注册表 + 权限策略，补恶意/异常输入、服务断连、版本不匹配测试；
-   - **实现前须细化（DEV_PLAN §5.8/§2 边界条款，需用户拍板）**：信任/分发策略、沙箱等级、凭据访问政策；默认禁用新来源的自动安装/自动执行。
-   - **验收**：获准 Skill/MCP 工具可调用并展示来源与所需权限；未启用/未授权扩展不可执行；错误、断连、无效 schema 与取消均清晰反馈且不泄露凭据。
+2. ~~**阶段 8（M6）：Skill 与 MCP**~~ → ✅ **代码完成（2026-10-04，`5268007` Skill + `0f4f13b` MCP）**，自动化验收全绿；设计前置（信任/分发/沙箱/凭据策略）已按 DEV_PLAN §5.8 细化并写入实施备注（默认禁用+指纹防篡改+恒 ask+无网络安装+env 走 DPAPI+不自动连接外部进程），**待用户推翻或 GUI 验收（清单⑤）**。
 3. **阶段 9（M7）：cron 定时引擎**：
    - 重复任务与执行历史建模（确定性幂等 migration）；定义时区/DST、错过触发、重启恢复、并发与失败策略；
    - scheduler 持久化调度状态、重启恢复且避免重复执行；运行任务复用阶段 7 Agent/工具权限/可观测状态；
@@ -165,10 +161,23 @@
    - **约束（§5.2/§5.9）**：无人值守任务不得自动获得新权限、预授权可撤销、超范围动作暂停并通知（不绕过交互审批）。
    - **验收**：重启、时区变化、错过触发、重复触发、执行中退出均按已确认语义工作；重复/并发无重复副作用；超权任务暂停并通知。
 
+**⑤ 阶段 8 GUI 人工验收清单（2026-10-04 拟定；样例与步骤见 `examples/skills/README.md`）**
+
+1. **安装与默认禁用**：复制 `examples/skills/demo-echo` 整目录 → `%APPDATA%/fairy/skills/`；设置 → 技能 →「重新扫描」→ 列表出现 `demo-echo v1.0.0`，状态**已禁用**，来源/声明权限（workspace:read）/两个工具（demo_echo、demo_bad_input，均「只读」徽标）可见。
+2. **启用 + 审批展示**：勾选启用（提示"每次调用需确认"）→ 聊天「用 demo_echo 工具回显 hello」→ **弹审批框**：「扩展」徽标 + 描述尾部 `来自 Skill「demo-echo v1.0.0」· 来源：local… · 声明权限：workspace:read` → 允许 → 回复含 `{ok:true, echoed:{text:"hello"}, env:{... leakedAppSecret:null}}`（**凭据零注入实证**）；拒绝/Esc 路径与阶段 7 相同。
+3. **整包拒绝可见**：给 skill.json 加一个未知字段 → 重扫 → 红字「加载失败（整包拒绝）：skill.json 含未知字段…」，工具不注册。
+4. **指纹防篡改**：启用状态下改动 `tools/echo.js` → 重扫 → 自动变「已禁用 + 内容已变更」，重新勾选才恢复启用。
+5. **入参校验**：让模型调 `demo_bad_input` 且 text 不以 ok 开头 → **审批前**被拒，回复含可见原因（入参校验失败）。
+6. **MCP 添加与连接**：设置 → MCP →「添加服务器」：名称 `demo-mcp`；启动命令 = node.exe 绝对路径（`C:\Users\91533\.fairy-tools\node24\node-v24.21.0-win-x64\node.exe`）；参数一行一个 = `examples\mcp-demo-server.js` 全路径；环境变量 `DEMO_TOKEN=abc123` → 保存（提示 env 已加密存 DPAPI，列表**只显示 KEY 名**）→「连接」→ 状态「已连接」+ `fairy-demo-mcp v1.0.0` + 工具 `demo_greet、demo_time`。
+7. **MCP 调用审批**：聊天「用 demo_greet 工具问候小F」→ 审批框（「扩展」徽标、红「执行」徽标、`来自 MCP 服务「demo-mcp」（每次调用需审批）`）→ 允许 → 回复含 `tokenConfigured:true`（env 注入成功且**不回显值**）；demo_time 同理返回服务端时间。
+8. **异常可见**：启动命令改成不存在的 exe → 连接失败红字（启动失败…）；连接成功后任务管理器杀掉对应 node 进程 → 状态自动变「错误」+ exit code/stderr 可见；「断开」→ 状态回「未连接」，**新会话中模型不再引用其工具**。
+9. **凭据落盘检查**：保存含 env 的服务器后查 `config.json`（**无 env 字段**）与 `secrets.dpapi.json`（protected:true、含 mcpEnv），`fairy-*.log` 与诊断报告**无 token 值**。
+10. **退出回收**：连接状态下托盘退出 → `tasklist` 无残留 demo-mcp 的 node 进程（taskkill 树杀）；重启后状态为「未连接」（**不自动重连**）。
+
 ## 6. 交接简区
 
-- 编号：**H9**（H1-H8 已完成归档；H8=同对话前序快照）
-- 源对话：本机 Pi 会话（阶段 7 实现+GUI 验收缺陷修复全程）
-- 状态：**阶段 7 GUI 验收通过（第 5 轮复测 2026-10-04 02:13-02:14 日志佐证 + 用户确认「验收通过」），「第二次审批框不弹」缺陷关闭**。代码 7 提交至 `92a7a58`（主体 `200da53` → 审批框修复 `cf88e41`/`2dfdf7f`/`41948d7`/`50f9a22`（修复④）→ `92a7a58`（修复⑤：根因 id 主权+回归测试）；worktree main 分支，全部已提交）；**227+3 单测**（core 227 + desktop 新增 3）+ typecheck + build 全绿 + 真实 agnes API E2E 4/4；tag **`m5`** 已打（阶段 7=M5 验收通过）。下一步见 **§5 ④**：MVP 收尾 → 阶段 8（Skill/MCP）→ 阶段 9（cron）。MVP GUI/干净虚拟机验收待做（web 账号禁言至 2026-10-11）；**tag `m1`/`m2`/`m3`/`m4`/`m5` 已全部归位至 `3b1dcd6`**（2026-10-04 用户指示，m1-m3 从 `b001520` 移出、m4 补打）。（历史修正：H9 前快照「代码无未提交改动」不准，修复④ 三文件当时已暂存未提交，随 `50f9a22` 提交。）
-- 用户已确认接续范围：阶段 7 全量实现+Shell+验收（**已完成**）；工具调用仅 API 通道；web 通道不做 tools。
-- **接续第一步**：按 §5 ④ 推进——① MVP GUI/干净虚拟机验收收尾（web 项等 10-11 解禁）；② 阶段 8 **设计前置**：Skill/MCP 信任/分发/沙箱/凭据策略需用户拍板（DEV_PLAN §5.8 明确"实现前细化"），拍板后实现 Skill → MCP；③ 阶段 9 cron。
+- 编号：**H10**（H1-H9 已完成归档；H8/H9=同对话前序快照）
+- 源对话：本机 Pi 会话（阶段 7 GUI 验收闭环 + 阶段 8 Skill/MCP 实现全程）
+- 状态：**阶段 7 GUI 验收通过（缺陷关闭，tag `m5`）；阶段 8 Skill+MCP 代码完成、自动化验收全绿，GUI 人工验收待执行（清单 §5 ⑤，样例 `examples/`）**。代码提交至 `0f4f13b`（阶段 8：`5268007` Skill + `0f4f13b` MCP；阶段 7 修复链见 §5 ③），worktree main 分支全部已提交；**282+3 单测**（core 282 + desktop 3）+ typecheck + build 全绿；tag `m1`-`m5` 全部在 `3b1dcd6`。MVP GUI/干净虚拟机验收待做（web 账号禁言至 2026-10-11）。
+- 用户已确认接续范围：阶段 7 全量（**已完成并验收**）；阶段 8 Skill/MCP（**代码完成待 GUI 验收**）；工具调用仅 API 通道；web 通道不做 tools；无云同步/多用户。
+- **接续第一步**：① 用户执行 §5 ⑤ 阶段 8 GUI 验收（`pnpm dev` 重启 → 按清单 10 项走，样例复制步骤见 `examples/skills/README.md`）；② 验收通过 → tag 处理（阶段 8=M6，验收过后打 `m6`）→ 进入阶段 9（cron，§5 ④ 第 3 条）；③ 并行可做 MVP GUI/干净虚拟机验收收尾。
