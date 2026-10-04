@@ -20,7 +20,11 @@ const WEB_UNSAFE_EXPORTS = [
   'runSkillTool',
   'discoverSkills',
   'buildSkillRegistrations',
-  'parseSkillManifest'
+  'parseSkillManifest',
+  // 阶段 8：MCP stdio 客户端（child_process 同样不许进 renderer）
+  'McpClient',
+  'buildMcpRegistrations',
+  'killTree'
 ];
 
 describe('renderer 入口隔离（index.web）', () => {

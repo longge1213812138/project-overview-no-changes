@@ -43,6 +43,8 @@ export interface FairyConfig {
    * 内容一变即识别为「已变更」自动回禁用，需重新启用。
    */
   skills?: Record<string, SkillStateEntry>
+  /** 阶段 8：MCP 服务器配置（env 内存视图来自 DPAPI 密件，明文落盘时剥离） */
+  mcpServers?: McpServerConfig[]
 }
 
 /** 单个技能的启用状态（config.json 明文字段，无凭据） */
@@ -52,12 +54,28 @@ export interface SkillStateEntry {
   fingerprint: string
 }
 
+/**
+ * MCP 服务器配置（内存合并视图）。
+ * 明文 config.json 只落 name/command/args/cwd；**env（可能含 token）走 DPAPI 密件**
+ * （与 api.apiKey 同一模式），诊断报告天然不含凭据。
+ */
+export interface McpServerConfig {
+  name: string
+  command: string
+  args: string[]
+  cwd?: string
+  /** 追加环境变量（凭据只在内存/密件中出现，绝不回传 renderer、不写日志） */
+  env?: Record<string, string>
+}
+
 /** config.json 的明文部分（密件字段一律不落这里） */
 interface PlaintextConfig {
   gatewayBin?: string
   channel?: ChannelKind | null
   api?: { baseUrl: string; model: string }
   skills?: Record<string, SkillStateEntry>
+  /** MCP 明文部分：env 一律剥离（进密件） */
+  mcpServers?: { name: string; command: string; args: string[]; cwd?: string }[]
 }
 
 /** 本机已知 ds-free-api 安装目录（docs/llm-bridge-notes.md §2/§6，阶段 2 探测位 ②） */
@@ -154,6 +172,44 @@ function normalizeSkills(raw: unknown): Record<string, SkillStateEntry> | undefi
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/** MCP 明文条目归一：name/command 非空、args 字符串数组、cwd 绝对路径；脏数据丢弃 */
+function normalizeMcpPlain(raw: unknown): { name: string; command: string; args: string[]; cwd?: string }[] {
+  if (!Array.isArray(raw)) return []
+  const out: { name: string; command: string; args: string[]; cwd?: string }[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+    const o = item as Record<string, unknown>
+    if (typeof o.name !== 'string' || o.name.trim() === '' || seen.has(o.name)) continue
+    if (typeof o.command !== 'string' || o.command.trim() === '') continue
+    if (!Array.isArray(o.args) || o.args.some((a) => typeof a !== 'string')) continue
+    const entry: { name: string; command: string; args: string[]; cwd?: string } = {
+      name: o.name.trim(),
+      command: o.command.trim(),
+      args: o.args as string[]
+    }
+    if (typeof o.cwd === 'string' && o.cwd !== '') entry.cwd = o.cwd
+    seen.add(entry.name)
+    out.push(entry)
+  }
+  return out
+}
+
+/** 密件 mcpEnv 归一：{server: {KEY: VALUE}}，坏结构丢弃 */
+function normalizeMcpEnv(raw: unknown): Record<string, Record<string, string>> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const out: Record<string, Record<string, string>> = {}
+  for (const [server, env] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof env !== 'object' || env === null || Array.isArray(env)) continue
+    const clean: Record<string, string> = {}
+    for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      if (key.trim() !== '' && typeof value === 'string') clean[key] = value
+    }
+    if (Object.keys(clean).length > 0) out[server] = clean
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 /** 合并明文 config.json 与 DPAPI 密件 → 内存视图（apiKey 缺失就补一个新的） */
 function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
   const cfg: FairyConfig = {
@@ -166,6 +222,14 @@ function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
   if (api) cfg.api = api
   const skills = normalizeSkills(plain.skills)
   if (skills) cfg.skills = skills
+  const mcpPlain = normalizeMcpPlain(plain.mcpServers)
+  if (mcpPlain.length > 0) {
+    const mcpEnv = normalizeMcpEnv(secrets.mcpEnv) ?? {}
+    cfg.mcpServers = mcpPlain.map((s) => ({
+      ...s,
+      ...(mcpEnv[s.name] !== undefined ? { env: mcpEnv[s.name] } : {})
+    }))
+  }
   return cfg
 }
 
@@ -175,6 +239,15 @@ function strip(cfg: FairyConfig): PlaintextConfig {
   if (cfg.gatewayBin) plain.gatewayBin = cfg.gatewayBin
   if (cfg.api) plain.api = { baseUrl: cfg.api.baseUrl, model: cfg.api.model }
   if (cfg.skills && Object.keys(cfg.skills).length > 0) plain.skills = cfg.skills
+  if (cfg.mcpServers && cfg.mcpServers.length > 0) {
+    // env 一律剥离（进密件），明文只留连接参数
+    plain.mcpServers = cfg.mcpServers.map((s) => ({
+      name: s.name,
+      command: s.command,
+      args: s.args,
+      ...(s.cwd !== undefined ? { cwd: s.cwd } : {})
+    }))
+  }
   return plain
 }
 
@@ -183,6 +256,11 @@ function toSecrets(cfg: FairyConfig): SecretValues {
   const secrets: SecretValues = { apiKey: cfg.apiKey }
   if (cfg.account) secrets.account = cfg.account
   if (cfg.api) secrets.apiApiKey = cfg.api.apiKey
+  const mcpEnv: Record<string, Record<string, string>> = {}
+  for (const server of cfg.mcpServers ?? []) {
+    if (server.env && Object.keys(server.env).length > 0) mcpEnv[server.name] = server.env
+  }
+  if (Object.keys(mcpEnv).length > 0) secrets.mcpEnv = mcpEnv
   return secrets
 }
 
@@ -237,7 +315,8 @@ export function loadConfig(): FairyConfig {
                 model: typeof legacyApi['model'] === 'string' ? legacyApi['model'] : ''
               }
             : undefined,
-        skills: normalizeSkills(o['skills'])
+        skills: normalizeSkills(o['skills']),
+        mcpServers: normalizeMcpPlain(o['mcpServers'])
       }
       const cfg = assemble(plain, secrets)
       if (migrated) {

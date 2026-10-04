@@ -21,6 +21,7 @@ import {
   toggleFloat
 } from './windows'
 import { initChat, shutdownChat } from './chat'
+import { shutdownMcp } from './mcp'
 import { registerHotkeys, unregisterHotkeys } from './hotkeys'
 
 // DEV_PLAN §7：尽早把 userData 指到 %APPDATA%/fairy（小写 fairy），必须先于一切读取 userData 的逻辑
@@ -109,6 +110,7 @@ app.on('before-quit', (event) => {
   log.info('[app] 退出中：收日程/通知 → 停网关')
   shutdownNotifyLoop()
   shutdownChat()
+  shutdownMcp() // 阶段 8：树杀 MCP 子进程（防孤儿；幂等）
   shutdownSidecar()
     .catch((err) => log.warn('[app] 网关回收异常（不阻塞退出）：', String(err)))
     .finally(() => {

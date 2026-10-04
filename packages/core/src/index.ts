@@ -20,3 +20,4 @@ export * from './intent';
 export * from './agent';
 export * from './agent/tools';
 export * from './agent/skill';
+export * from './agent/mcp';

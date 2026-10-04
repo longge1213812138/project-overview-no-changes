@@ -30,6 +30,8 @@ export interface SecretValues {
   account?: GatewayAccountConfig
   /** OpenAI 兼容 API 的 apiKey（config.json 里只留 baseUrl/model） */
   apiApiKey?: string
+  /** 阶段 8：MCP 服务器的追加 env（可能含 token；{server: {KEY: VALUE}}，绝不回传 renderer） */
+  mcpEnv?: Record<string, Record<string, string>>
 }
 
 interface SecretsFile {
@@ -97,7 +99,24 @@ function normalize(values: unknown): SecretValues {
     }
     out.account = account
   }
+  const mcpEnv = normalizeMcpEnv(o.mcpEnv)
+  if (mcpEnv) out.mcpEnv = mcpEnv
   return out
+}
+
+/** 密件 mcpEnv 归一：只保留 string→string 形状，空值丢弃 */
+function normalizeMcpEnv(raw: unknown): Record<string, Record<string, string>> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const out: Record<string, Record<string, string>> = {}
+  for (const [server, env] of Object.entries(raw as Record<string, unknown>)) {
+    if (server.trim() === '' || typeof env !== 'object' || env === null || Array.isArray(env)) continue
+    const clean: Record<string, string> = {}
+    for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      if (key.trim() !== '' && typeof value === 'string' && value !== '') clean[key] = value
+    }
+    if (Object.keys(clean).length > 0) out[server] = clean
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 /** 读密件（进程内缓存；文件不存在 = 首启，返回 {}） */

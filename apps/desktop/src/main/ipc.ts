@@ -60,6 +60,13 @@ import {
 import { isAutoStartEnabled, setAutoStart } from './autostart'
 import { exportDiagnostics, openLogsDir } from './diagnostics'
 import { listSkills, rescanSkills, setSkillEnabled } from './skills'
+import {
+  connectMcpServer,
+  disconnectMcpServer,
+  listMcpServers,
+  removeMcpServer,
+  saveMcpServer
+} from './mcp'
 
 let tray: Tray | null = null
 let normalIcon: Electron.NativeImage | null = null
@@ -292,6 +299,25 @@ export function registerIpcHandlers(): void {
     return setSkillEnabled(name, enabled)
   })
   ipcMain.handle(IPC.skillsReload, () => rescanSkills())
+
+  // ===== 阶段 8：MCP 服务器（env 值不出 main；成功变更由 mcp.ts 广播 mcp:changed） =====
+  ipcMain.handle(IPC.mcpList, () => listMcpServers())
+  ipcMain.handle(IPC.mcpSave, (_event, input: unknown) => {
+    if (typeof input !== 'object' || input === null) throw new Error('保存入参必须是对象')
+    return saveMcpServer(input as Parameters<typeof saveMcpServer>[0])
+  })
+  ipcMain.handle(IPC.mcpRemove, (_event, name: unknown) => {
+    if (typeof name !== 'string' || name === '') throw new Error('服务器名必须是非空字符串')
+    return removeMcpServer(name)
+  })
+  ipcMain.handle(IPC.mcpConnect, (_event, name: unknown) => {
+    if (typeof name !== 'string' || name === '') throw new Error('服务器名必须是非空字符串')
+    return connectMcpServer(name)
+  })
+  ipcMain.handle(IPC.mcpDisconnect, (_event, name: unknown) => {
+    if (typeof name !== 'string' || name === '') throw new Error('服务器名必须是非空字符串')
+    return disconnectMcpServer(name)
+  })
 
   // ===== 阶段 4：记忆（面板 CRUD；add/update/remove/import 成功后广播 memoryChanged） =====
   ipcMain.handle(IPC.memoryList, (_event, filter?: unknown) =>

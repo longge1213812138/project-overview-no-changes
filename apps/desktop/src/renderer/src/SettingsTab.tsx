@@ -6,6 +6,7 @@ import type {
   ConfigureResult,
   GatewayAccountConfig,
   GatewayState,
+  McpServerListItem,
   SkillListItem,
   TestChatResult
 } from '@fairy/core'
@@ -563,6 +564,9 @@ export default function SettingsTab() {
 
       {/* ===== F. 技能 Skill（阶段 8 / DEV_PLAN §5.8）：列表 + 启用/禁用 + 重扫 ===== */}
       <SkillsSection />
+
+      {/* ===== G. MCP 服务器（阶段 8 / DEV_PLAN §5.8）：配置 + 连接管理 ===== */}
+      <McpSection />
     </div>
   )
 }
@@ -771,6 +775,212 @@ function SkillsSection() {
                 </label>
               </>
             )}
+          </li>
+        ))}
+      </ul>
+      {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
+    </section>
+  )
+}
+
+const MCP_STATUS_TEXT: Record<McpServerListItem['status'], string> = {
+  stopped: '未连接',
+  connecting: '连接中…',
+  ready: '已连接',
+  error: '错误'
+}
+
+/**
+ * G. MCP 服务器（阶段 8 / DEV_PLAN §5.8）：
+ * 配置列表（状态/工具/警告可见）+ 连接/断开 + 添加/移除。
+ * 凭据安全：env 只在保存时写入（DPAPI），列表仅回显 KEY 名，值永不出 main。
+ */
+function McpSection() {
+  const [items, setItems] = useState<McpServerListItem[] | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<Feedback | null>(null)
+
+  // 添加表单
+  const [showForm, setShowForm] = useState(false)
+  const [name, setName] = useState('')
+  const [command, setCommand] = useState('')
+  const [argsText, setArgsText] = useState('')
+  const [envText, setEnvText] = useState('')
+
+  const refresh = useCallback(async () => {
+    try {
+      setItems(await window.fairy.mcp.list())
+    } catch (e) {
+      setMsg({ kind: 'err', text: `读取 MCP 列表失败：${String(e)}` })
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    return window.fairy.mcp.onChanged(() => void refresh())
+  }, [refresh])
+
+  const run = async (key: string, action: () => Promise<{ ok: boolean; error?: string }>, okText: string) => {
+    setBusy(key)
+    setMsg(null)
+    try {
+      const res = await action()
+      setMsg(res.ok ? { kind: 'ok', text: okText } : { kind: 'err', text: res.error ?? '操作失败' })
+      await refresh()
+    } catch (e) {
+      setMsg({ kind: 'err', text: `操作失败：${String(e)}` })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleSaveNew = async () => {
+    const args = argsText.split('\n').map((a) => a.trim()).filter((a) => a !== '')
+    const env: Record<string, string> = {}
+    for (const line of envText.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed === '') continue
+      const eq = trimmed.indexOf('=')
+      if (eq <= 0) {
+        setMsg({ kind: 'err', text: `环境变量格式应为 KEY=VALUE：${trimmed}` })
+        return
+      }
+      env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1)
+    }
+    await run(
+      'save-new',
+      () =>
+        window.fairy.mcp.save({
+          name: name.trim(),
+          command: command.trim(),
+          args,
+          ...(Object.keys(env).length > 0 ? { env } : {})
+        }),
+      `已保存 MCP 服务器「${name.trim()}」${Object.keys(env).length > 0 ? '（env 已加密存入 DPAPI）' : ''}`
+    )
+    if (items !== null) {
+      // 成功才清表单
+      const latest = await window.fairy.mcp.list().catch(() => null)
+      if (latest?.some((s) => s.name === name.trim())) {
+        setShowForm(false)
+        setName('')
+        setCommand('')
+        setArgsText('')
+        setEnvText('')
+      }
+    }
+  }
+
+  return (
+    <section className="mcp-settings">
+      <h3>MCP 服务器</h3>
+      <p className="section-hint">
+        外部工具服务（stdio 协议）。不自动连接：保存后在列表手动「连接」，其工具即进入统一审批链
+        （「扩展」徽标 + 每次调用逐一确认）。环境变量（可能含 token）加密存入 DPAPI，此处只回显
+        变量名；命令行不含 shell 解释，Windows 下需 node 脚本请直接填 node.exe 绝对路径。
+      </p>
+      <div className="skills-head">
+        <button
+          className="btn"
+          onClick={() => {
+            setShowForm((v) => !v)
+            setMsg(null)
+          }}
+        >
+          {showForm ? '收起表单' : '添加服务器'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="mcp-form">
+          <label className="setting-form">
+            <span>名称</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：filesystem" />
+          </label>
+          <label className="setting-form">
+            <span>启动命令（可执行文件绝对路径或 PATH 内命令名）</span>
+            <input
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="如：C:\Program Files\nodejs\node.exe"
+            />
+          </label>
+          <label className="setting-form">
+            <span>参数（每行一个）</span>
+            <textarea
+              rows={3}
+              value={argsText}
+              onChange={(e) => setArgsText(e.target.value)}
+              placeholder={'如：\nC:\\tools\\mcp-server\\index.js'}
+            />
+          </label>
+          <label className="setting-form">
+            <span>环境变量（每行 KEY=VALUE，加密保存；留空 = 不注入）</span>
+            <textarea rows={2} value={envText} onChange={(e) => setEnvText(e.target.value)} placeholder="API_TOKEN=..." />
+          </label>
+          <div className="app-actions">
+            <button className="btn btn-primary" onClick={() => void handleSaveNew()} disabled={busy !== null}>
+              {busy === 'save-new' ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {items !== null && items.length === 0 && (
+        <p className="section-hint">尚未配置 MCP 服务器（点「添加服务器」）。</p>
+      )}
+      <ul className="skills-list">
+        {items?.map((s) => (
+          <li key={s.name} className={`skill-row${s.status === 'error' ? ' skill-row-error' : ''}`}>
+            <div className="skill-main">
+              <span className="skill-name">{s.name}</span>
+              <span className={`skill-flag${s.status === 'ready' ? ' flag-on' : s.status === 'error' ? ' skill-flag-err' : ''}`}>
+                {MCP_STATUS_TEXT[s.status]}
+              </span>
+              {s.serverInfo?.version !== undefined && (
+                <span className="skill-version">
+                  {s.serverInfo.name ?? ''} v{s.serverInfo.version}
+                </span>
+              )}
+            </div>
+            <p className="skill-meta">
+              {s.command} {s.args.join(' ')}
+              {s.envKeys.length > 0 ? ` · env：${s.envKeys.join('、')}（DPAPI）` : ''}
+              {s.cwd !== undefined ? ` · cwd：${s.cwd}` : ''}
+            </p>
+            {s.error !== undefined && <p className="skill-error-text">{s.error}</p>}
+            <p className="skill-meta">
+              工具：{s.tools.length === 0 ? (s.status === 'ready' ? '无' : '未连接') : s.tools.map((t) => t.name).join('、')}
+            </p>
+            {s.warnings.length > 0 && (
+              <p className="skill-warn-text">警告：{s.warnings.join('；')}</p>
+            )}
+            <div className="app-actions">
+              {s.status === 'ready' || s.status === 'connecting' ? (
+                <button
+                  className="btn"
+                  disabled={busy !== null || s.status === 'connecting'}
+                  onClick={() => void run(s.name, () => window.fairy.mcp.disconnect(s.name), `已断开 ${s.name}`)}
+                >
+                  断开
+                </button>
+              ) : (
+                <button
+                  className="btn"
+                  disabled={busy !== null}
+                  onClick={() => void run(s.name, () => window.fairy.mcp.connect(s.name), `已连接 ${s.name}`)}
+                >
+                  {busy === s.name ? '连接中…' : s.status === 'error' ? '重试连接' : '连接'}
+                </button>
+              )}
+              <button
+                className="btn"
+                disabled={busy !== null}
+                onClick={() => void run(s.name, () => window.fairy.mcp.remove(s.name), `已移除 ${s.name}`)}
+              >
+                移除
+              </button>
+            </div>
           </li>
         ))}
       </ul>

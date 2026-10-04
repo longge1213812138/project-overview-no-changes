@@ -301,6 +301,32 @@ body {
 .skill-desc { margin: 6px 0 2px; font-size: 13px; }
 .skill-meta { margin: 2px 0; font-size: 12px; color: #6b7280; }
 .skill-error-text { margin: 6px 0 0; font-size: 13px; color: #dc2626; }
+.skill-warn-text { margin: 2px 0; font-size: 12px; color: #b45309; }
+.skill-flag.skill-flag-err { background: #fee2e2; color: #b91c1c; }
+
+/* ===== 阶段 8：MCP 服务器 ===== */
+.mcp-settings { margin-top: 10px; }
+.mcp-form {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(107, 114, 128, 0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mcp-form .setting-form { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.mcp-form textarea {
+  padding: 7px 10px;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-family: Consolas, monospace;
+  resize: vertical;
+}
+.mcp-form textarea:focus { outline: none; border-color: #4f46e5; }
 .app-actions { display: flex; gap: 8px; margin-top: 8px; }
 .app-actions .btn { margin-top: 0; }
 

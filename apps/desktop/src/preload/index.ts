@@ -24,6 +24,9 @@ import type {
   MemoryListFilter,
   MemoryRecord,
   MessageDto,
+  McpActionResult,
+  McpSaveInput,
+  McpServerListItem,
   SessionMeta,
   SkillListItem,
   TabKey,
@@ -109,6 +112,18 @@ contextBridge.exposeInMainWorld(
         ipcRenderer.invoke(IPC.skillsSetEnabled, name, enabled),
       reload: (): Promise<SkillListItem[]> => ipcRenderer.invoke(IPC.skillsReload),
       onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.skillsChanged, () => cb())
+    },
+
+    // ===== 阶段 8：MCP 服务器（连接管理；env 值永不出 main） =====
+    mcp: {
+      list: (): Promise<McpServerListItem[]> => ipcRenderer.invoke(IPC.mcpList),
+      save: (input: McpSaveInput): Promise<McpActionResult> =>
+        ipcRenderer.invoke(IPC.mcpSave, input),
+      remove: (name: string): Promise<McpActionResult> => ipcRenderer.invoke(IPC.mcpRemove, name),
+      connect: (name: string): Promise<McpActionResult> => ipcRenderer.invoke(IPC.mcpConnect, name),
+      disconnect: (name: string): Promise<McpActionResult> =>
+        ipcRenderer.invoke(IPC.mcpDisconnect, name),
+      onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.mcpChanged, () => cb())
     },
 
     // 'gateway:state' 为阶段 2 遗留通道（不在 IPC 常量表，保持兼容）

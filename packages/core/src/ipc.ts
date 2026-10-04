@@ -113,6 +113,18 @@ export interface FairyApi {
     /** 技能状态变化（启用/禁用/重扫）后刷新 */
     onChanged(cb: () => void): () => void;
   };
+  /** 阶段 8：MCP 服务器（连接管理；env 值只在 main/DPAPI，renderer 仅见 KEY 名） */
+  mcp: {
+    list(): Promise<McpServerListItem[]>;
+    /** 新增/更新（env 传 undefined = 保留已存；传对象 = 整体替换） */
+    save(input: McpSaveInput): Promise<McpActionResult>;
+    remove(name: string): Promise<McpActionResult>;
+    /** 连接（initialize + tools/list）并注册其工具；失败错误可见 */
+    connect(name: string): Promise<McpActionResult>;
+    disconnect(name: string): Promise<McpActionResult>;
+    /** 状态变化（连接/断开/保存/意外退出）后刷新 */
+    onChanged(cb: () => void): () => void;
+  };
   /** 仅允许 http/https（main 侧校验） */
   openExternal(url: string): Promise<void>;
   /** 订阅网关状态变化，返回退订函数 */
@@ -296,7 +308,15 @@ export const IPC = {
   /** renderer → main：重新扫描技能目录并装配 */
   skillsReload: 'skills:reload',
   /** main → renderer：技能列表/状态已变化 */
-  skillsChanged: 'skills:changed'
+  skillsChanged: 'skills:changed',
+  // ===== 阶段 8：MCP 服务器（配置/连接管理/变更广播） =====
+  mcpList: 'mcp:list',
+  mcpSave: 'mcp:save',
+  mcpRemove: 'mcp:remove',
+  mcpConnect: 'mcp:connect',
+  mcpDisconnect: 'mcp:disconnect',
+  /** main → renderer：服务器状态/工具/配置已变化（含意外退出） */
+  mcpChanged: 'mcp:changed'
 } as const;
 
 // ===== 阶段 4：记忆类型 =====
@@ -358,6 +378,44 @@ export interface SkillListItem {
   changed: boolean;
   /** 加载/校验错误（非空 = 整包拒绝，原因可见） */
   error?: string;
+}
+
+// ===== 阶段 8：MCP 服务器 =====
+
+export type McpServerStatus = 'stopped' | 'connecting' | 'ready' | 'error';
+
+/** 设置页 MCP 服务器条目（env 只回 KEY 名，值永不出 main） */
+export interface McpServerListItem {
+  name: string;
+  command: string;
+  args: string[];
+  cwd?: string;
+  /** 已配置的环境变量 KEY 名（值不回传） */
+  envKeys: string[];
+  status: McpServerStatus;
+  /** 连接/退出错误（status==='error' 时可见） */
+  error?: string;
+  /** 服务端自述（连接成功后） */
+  serverInfo?: { name?: string; version?: string };
+  /** 已就绪的工具（连接成功后） */
+  tools: { name: string; description: string }[];
+  /** 归一化/协议/装配期的可见警告（坏条目、垃圾行、冲突跳过） */
+  warnings: string[];
+}
+
+/** 保存/移除/连接结果（错误直接展示） */
+export interface McpActionResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** 保存输入（env 省略 = 保留已存；否则整体替换） */
+export interface McpSaveInput {
+  name: string;
+  command: string;
+  args: string[];
+  cwd?: string;
+  env?: Record<string, string>;
 }
 
 // ===== 通道选择（OpenAI 兼容 API / DeepSeek 网页）=====
