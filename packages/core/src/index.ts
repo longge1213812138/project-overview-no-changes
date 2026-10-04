@@ -5,6 +5,7 @@
  * 阶段 4：memory/（FTS5 记忆）、intent/（意图解析）。
  * 阶段 5：calendar/（日程 events）。
  * 阶段 7：agent/（有界工具调用运行时）；agent/tools/（内置工具执行器，含 OS 执行，仅 main）。
+ * 阶段 9：agent/cron/（cron 调度 + SQLite 持久化，仅 main；renderer 走 IPC）。
  * 渲染层请用 index.web.ts（本入口含 node 内建依赖，仅供 main/preload）。
  */
 
@@ -21,3 +22,4 @@ export * from './agent';
 export * from './agent/tools';
 export * from './agent/skill';
 export * from './agent/mcp';
+export * from './agent/cron';

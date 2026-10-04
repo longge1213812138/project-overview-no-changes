@@ -396,6 +396,18 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 
 **验收**：重启、时区变化、错过触发、重复触发与执行中退出均按已确认语义工作；重复/并发不会造成重复副作用；超出预授权权限的任务暂停并通知，不会绕过交互审批。
 
+**实施备注（2026-10-05 已落地，代码完成待 GUI 人工验收）**：
+- **迁移 v4（确定性幂等）**：`cron_tasks`（调度状态 `next_run_at`/`last_fired_at`、预授权集合 `preauthorized` JSON、`catchup`/`max_retries`/`retry_backoff_ms`/`failure_limit`/`consecutive_failures`/`pause_reason`）+ `cron_runs`（**幂等键 `UNIQUE(task_id, scheduled_for)`**、`attempt`/`manual`/`next_retry_at`/`output`/`error`）；全部 IF NOT EXISTS，与日程 `events` 分开建模。状态迁移一律带 WHERE 守卫（running→终态只兑现一次），迟到的完成回调绝不覆盖恢复流程写入的 interrupted。
+- **表达式与时区（`core/agent/cron/schedule.ts`，Intl 实现零依赖）**：标准 5 字段 + `@daily` 等宏；日/周同时受限 = Vixie **OR 语义**；触发时刻 = 任务 IANA 时区墙上时钟换算 epoch（**任务时区创建时固化，系统时区变化不影响已存在任务**）；DST 春季缺口（不存在的墙上时刻）→ 该次跳过，秋季重叠 → 只取较早一次（每个墙上时刻每天最多触发一次）；未来无触发的表达式（`0 0 30 2 *`）保存期拒绝；非法时区 fail-visible。
+- **错过与恢复语义**：停机窗口内多次错过 → **只补最近一次**（`latestDue` 合并枚举，带上限防卡死）；任务 `catchup=false` → 记 `missed` 不补跑；启动先收敛 `running→interrupted`（执行中退出可见、不伪装成功/失败），陈旧 pending 按 catchup 执行或记 missed，同任务恢复期已有 pending 不再补 claim（避免同轮双执行）。
+- **并发与重复防护**：claim = `INSERT OR IGNORE` + 唯一键 → 重复触发/竞态一律 duplicate 吞掉；同任务上一轮未结束 → 新触发记 `skipped`（可见）；main 全局**串行执行队列**（一次只跑一个任务），10s tick（unref，不阻止退出）。
+- **无人值守权限（§5.2/§5.9）**：任务只暴露**预授权工具集**（`approval=auto` 的工具也必须在集合内，集合约束不因策略宽松而绕过）；**越界（outside）永不授予**；未预授权/越界 → 拒绝 + 该轮 `denied` + **暂停任务并系统通知**（点击通知切「定时」tab，暂停原因面板可见）——不弹审批、也绝不绕过审批；assess=deny（危险命令等）与交互会话同语义、不升级。
+- **通道门控**：cron 仅 **API 通道**执行（阶段 7 范围决定）；通道不可用/网页通道 → 该轮 failed + 任务立即暂停 + 通知（原因可见）；端点不支持工具按聊天同款 capabilityHint 落运行记录，不静默降级。
+- **失败策略**：`maxRetries`（0-3）指数退避重试，重试复用同一运行行（attempt+1，不新建幂等键）；重试耗尽计连续失败，达 `failure_limit`（默认 3）→ 自动暂停 + 通知。
+- **入口隔离**：`agent/cron`（schedule/store/policy）只从 `@fairy/core` 完整入口导出，**不进 index.web**；renderer 仅经 `fairy.cron` IPC + `ipc.ts` 类型访问（`entry-isolation.test.ts` 断言 createCronStore/createCronAuthorizer/planTrigger/planRecovery 不在 web 面）。
+- **UI**：主窗口底部新增「定时」tab（CronPanel）：新建/编辑（名称/表达式/时区/预授权工具勾选/错过补跑/重试次数）、暂停/恢复/立即运行/删除、展开运行历史（状态徽章 pending/running/success/failed/denied/missed/skipped/interrupted、耗时、输出、错误、暂停原因）。
+- **测试**：core 新增 **82** 项（schedule 38 含 DST/OR/合并语义、store 27 含幂等 claim/并发/守卫/失败暂停、policy 14 含预授权硬条件/越界升级、迁移 v4 3）+ desktop 新增 **7** 项（驱动：恢复合并补跑/catchup 关记 missed/执行中退出 interrupted/门控暂停通知/幂等 init/IPC 错误路径/广播）；全仓 **374 单测** + typecheck + build 全绿。
+
 ## 7. 数据模型
 
 **当前 MVP 及后续路线**使用单文件 SQLite：`%APPDATA%/fairy/fairy.db`（WAL）。Agent/工具循环和 cron 需通过确定性、幂等 migration 扩展本地 schema；产品保持本地单用户，不建设云同步或多用户服务端 schema。

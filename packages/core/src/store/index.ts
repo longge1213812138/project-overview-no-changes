@@ -1,7 +1,7 @@
 /**
  * 阶段 3 任务 A：SQLite 存储层（单文件库 + 确定性幂等迁移）。
  *
- * 表结构严格按 docs/DEV_PLAN.md §7（v1 会话/消息/kv，v2 记忆 + FTS5，v3 日程 events）；迁移沿用蓝本 invariant：
+ * 表结构严格按 docs/DEV_PLAN.md §7（v1 会话/消息/kv，v2 记忆 + FTS5，v3 日程 events，v4 cron 任务/运行历史）；迁移沿用蓝本 invariant：
  * - migrations 全部 IF NOT EXISTS 幂等执行；
  * - kv.schema_version 记录当前版本；
  * - db 版本 > 已知版本 → 抛错 fail-visible，绝不写覆盖用户数据；
@@ -87,6 +87,55 @@ export const migrations: Migration[] = [
             created_at INT
           );
           CREATE INDEX IF NOT EXISTS idx_events_remind ON events(remind_at);
+        `);
+      })();
+    }
+  },
+  {
+    version: 4,
+    up(db) {
+      // 阶段 9（DEV_PLAN §5.9/§7）：cron 定时任务 + 执行历史，与日程 events 分开建模。
+      // 幂等性由 IF NOT EXISTS + UNIQUE(task_id, scheduled_for) 共同保证：
+      // 重复触发/重启恢复对同一计划时刻只会 claim 一次（at-most-once 幂等键）。
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS cron_tasks(
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            schedule TEXT NOT NULL,
+            timezone TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            preauthorized TEXT NOT NULL DEFAULT '[]',
+            catchup INT NOT NULL DEFAULT 1,
+            max_retries INT NOT NULL DEFAULT 0,
+            retry_backoff_ms INT NOT NULL DEFAULT 30000,
+            failure_limit INT NOT NULL DEFAULT 3,
+            consecutive_failures INT NOT NULL DEFAULT 0,
+            pause_reason TEXT,
+            last_fired_at INT,
+            next_run_at INT,
+            created_at INT NOT NULL,
+            updated_at INT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_cron_tasks_due ON cron_tasks(status, next_run_at);
+          CREATE TABLE IF NOT EXISTS cron_runs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            scheduled_for INT NOT NULL,
+            attempt INT NOT NULL DEFAULT 0,
+            manual INT NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            next_retry_at INT,
+            started_at INT,
+            finished_at INT,
+            output TEXT,
+            error TEXT,
+            created_at INT NOT NULL,
+            UNIQUE(task_id, scheduled_for)
+          );
+          CREATE INDEX IF NOT EXISTS idx_cron_runs_task ON cron_runs(task_id, id DESC);
+          CREATE INDEX IF NOT EXISTS idx_cron_runs_due ON cron_runs(status, next_retry_at);
         `);
       })();
     }

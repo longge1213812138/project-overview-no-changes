@@ -125,6 +125,23 @@ export interface FairyApi {
     /** 状态变化（连接/断开/保存/意外退出）后刷新 */
     onChanged(cb: () => void): () => void;
   };
+  /** 阶段 9：cron 定时任务（与日程提醒分开建模；执行复用阶段 7 Agent/工具权限） */
+  cron: {
+    /** 任务列表 + 可预授权工具选项（来自 main 工具注册表） */
+    list(): Promise<CronListResult>;
+    /** 单任务运行历史（按触发时间倒序） */
+    runs(taskId: string, limit?: number): Promise<CronRun[]>;
+    create(input: CronCreateInput): Promise<CronActionResult>;
+    /** 编辑（改表达式/时区会重新计算 nextRunAt） */
+    update(id: string, patch: CronUpdateInput): Promise<CronActionResult>;
+    /** 暂停/恢复（恢复时从当前时刻重算下次触发） */
+    setEnabled(id: string, enabled: boolean): Promise<CronActionResult>;
+    remove(id: string): Promise<void>;
+    /** 立即运行一次（手动触发，同样走预授权与超范围暂停策略） */
+    trigger(id: string): Promise<CronActionResult>;
+    /** 任务/运行状态变化后刷新 */
+    onChanged(cb: () => void): () => void;
+  };
   /** 仅允许 http/https（main 侧校验） */
   openExternal(url: string): Promise<void>;
   /** 订阅网关状态变化，返回退订函数 */
@@ -316,7 +333,17 @@ export const IPC = {
   mcpConnect: 'mcp:connect',
   mcpDisconnect: 'mcp:disconnect',
   /** main → renderer：服务器状态/工具/配置已变化（含意外退出） */
-  mcpChanged: 'mcp:changed'
+  mcpChanged: 'mcp:changed',
+  // ===== 阶段 9：cron 定时任务（任务 CRUD + 运行历史 + 变更广播） =====
+  cronList: 'cron:list',
+  cronRuns: 'cron:runs',
+  cronCreate: 'cron:create',
+  cronUpdate: 'cron:update',
+  cronSetEnabled: 'cron:setEnabled',
+  cronRemove: 'cron:remove',
+  cronTrigger: 'cron:trigger',
+  /** main → renderer：任务/运行状态已变化（面板刷新） */
+  cronChanged: 'cron:changed'
 } as const;
 
 // ===== 阶段 4：记忆类型 =====
@@ -418,6 +445,113 @@ export interface McpSaveInput {
   env?: Record<string, string>;
 }
 
+// ===== 阶段 9：cron 定时任务（DEV_PLAN §5.9；与日程提醒分开建模） =====
+
+export type CronTaskStatus = 'active' | 'paused';
+
+/**
+ * 运行状态语义（DEV_PLAN 阶段 9 验收的「已确认语义」）：
+ * - pending：已 claim（幂等键 task_id+scheduled_for 唯一），排队/等待重试，尚未执行；
+ * - running：执行中；应用退出 → interrupted（不伪装成成功/失败）；
+ * - success / failed：本轮执行结果（failed 含重试耗尽后的最终失败）；
+ * - denied：无人值守运行中出现未预授权/越界（超范围）动作 → 该次运行被拒且任务被暂停；
+ * - missed：错过触发且任务 catchup 关闭（记录可见，不补跑）；
+ * - skipped：并发防护跳过（同一任务上一轮仍在运行）。
+ */
+export type CronRunStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'denied'
+  | 'missed'
+  | 'skipped'
+  | 'interrupted';
+
+export interface CronTask {
+  id: string;
+  name: string;
+  /** 交给 Agent 的任务指令（unattended 运行的用户消息） */
+  prompt: string;
+  /** 5 字段 cron 表达式，支持 @yearly/@monthly/@weekly/@daily/@hourly 宏 */
+  schedule: string;
+  /** IANA 时区；触发时刻按该时区墙上时钟计算（默认创建时系统时区，与系统时区后续变化解耦） */
+  timezone: string;
+  status: CronTaskStatus;
+  /**
+   * 预授权工具名集合（§5.2/§5.9）：无人值守运行只暴露这些工具，
+   * 且永不授予「越界（outside）」；撤销 = 从集合移除或暂停任务。
+   */
+  preauthorized: string[];
+  /** 停机期间错过的触发：true=补跑最近一次（更早的合并跳过），false=标记 missed 不补跑 */
+  catchup: boolean;
+  /** 失败重试次数（0=不重试；仅对 failed 重试，denied 不重试） */
+  maxRetries: number;
+  retryBackoffMs: number;
+  /** 连续失败达到该上限 → 自动暂停任务并通知（不静默重试到天荒地老） */
+  failureLimit: number;
+  consecutiveFailures: number;
+  /** 暂停原因（超范围/连续失败/通道不支持…面板与通知展示） */
+  pauseReason: string | null;
+  lastFiredAt: number | null;
+  /** 持久化调度状态：下次触发时刻（epoch ms）；null = 未来无触发 */
+  nextRunAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CronRun {
+  id: number;
+  taskId: string;
+  /** 计划触发时刻（epoch ms）——幂等键，同任务同时刻只会有一行 */
+  scheduledFor: number;
+  attempt: number;
+  /** 手动「立即运行」标记（不属于计划触发） */
+  manual: boolean;
+  status: CronRunStatus;
+  nextRetryAt: number | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  output: string | null;
+  error: string | null;
+  createdAt: number;
+}
+
+/** 面板「预授权工具」选择器选项（来自 main 进程工具注册表） */
+export interface CronToolOption {
+  name: string;
+  description: string;
+  risk: ToolRisk;
+  source: 'builtin' | 'skill' | 'mcp';
+}
+
+export interface CronListResult {
+  tasks: CronTask[];
+  tools: CronToolOption[];
+}
+
+export interface CronCreateInput {
+  name: string;
+  prompt: string;
+  schedule: string;
+  /** 缺省 = 创建时系统时区 */
+  timezone?: string;
+  preauthorized?: string[];
+  catchup?: boolean;
+  /** 0-3 */
+  maxRetries?: number;
+  /** 1-10，缺省 3 */
+  failureLimit?: number;
+}
+
+export type CronUpdateInput = Partial<CronCreateInput>;
+
+export interface CronActionResult {
+  ok: boolean;
+  error?: string;
+  task?: CronTask;
+}
+
 // ===== 通道选择（OpenAI 兼容 API / DeepSeek 网页）=====
 
 export type ChannelKind = 'api' | 'web';
@@ -475,7 +609,7 @@ export interface EventListFilter {
 }
 
 /** 主窗口底部 tab（点系统通知后由 main 指定切换） */
-export type TabKey = 'chat' | 'calendar' | 'memory' | 'settings';
+export type TabKey = 'chat' | 'calendar' | 'memory' | 'cron' | 'settings';
 
 // ===== 阶段 6：打包硬化 =====
 

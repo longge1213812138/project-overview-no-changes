@@ -1273,6 +1273,364 @@ body {
   opacity: 0.55;
 }
 
+/* ===== 阶段 9 · 定时任务面板（cron，与日程分开建模） ===== */
+.cron-panel {
+  max-width: 900px;
+}
+
+.cron-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.cron-toolbar-info {
+  font-size: 12.5px;
+  opacity: 0.7;
+  line-height: 1.7;
+}
+.cron-toolbar .btn {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+/* 新建/编辑表单（风格同 .cal-form，字段更多） */
+.cron-form {
+  border: 1px solid rgba(79, 70, 229, 0.35);
+  background: rgba(79, 70, 229, 0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.cron-form-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.cron-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cron-form-row + .cron-form-row {
+  margin-top: 8px;
+}
+.cron-form-row .btn {
+  margin-top: 0;
+}
+.cron-input-name,
+.cron-input-schedule,
+.cron-input-tz,
+.cron-input-prompt {
+  padding: 7px 10px;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13.5px;
+}
+.cron-input-name:focus,
+.cron-input-schedule:focus,
+.cron-input-tz:focus,
+.cron-input-prompt:focus {
+  outline: none;
+  border-color: #4f46e5;
+}
+.cron-input-name {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+.cron-input-schedule {
+  flex: 0 1 200px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+}
+.cron-input-tz {
+  flex: 0 1 180px;
+  font-size: 12.5px;
+}
+.cron-form-row textarea.cron-input-prompt {
+  flex: 1 1 100%;
+  resize: vertical;
+  line-height: 1.7;
+}
+.cron-form-opts {
+  font-size: 12.5px;
+}
+.cron-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.cron-opt select {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12.5px;
+}
+
+/* 预授权工具选择区 */
+.cron-form-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(107, 114, 128, 0.35);
+}
+.cron-form-block-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.cron-form-block-hint {
+  font-weight: 400;
+  opacity: 0.65;
+  margin-left: 6px;
+}
+.cron-form-no-tools {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.cron-tool-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+}
+.cron-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.cron-tool input {
+  accent-color: #4f46e5;
+}
+.cron-tool-name {
+  font-family: Consolas, 'Courier New', monospace;
+}
+.cron-risk {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.cron-risk-read {
+  background: rgba(22, 163, 74, 0.14);
+  color: #16a34a;
+}
+.cron-risk-write {
+  background: rgba(217, 119, 6, 0.16);
+  color: #d97706;
+}
+.cron-risk-exec {
+  background: rgba(220, 38, 38, 0.14);
+  color: #dc2626;
+}
+
+/* 任务列表 */
+.cron-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cron-row {
+  border: 1px solid rgba(107, 114, 128, 0.25);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cron-row:hover {
+  border-color: rgba(79, 70, 229, 0.45);
+}
+.cron-row-paused {
+  background: rgba(107, 114, 128, 0.06);
+}
+.cron-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cron-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.cron-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cron-badge-active {
+  background: rgba(22, 163, 74, 0.14);
+  color: #16a34a;
+}
+.cron-badge-paused {
+  background: rgba(107, 114, 128, 0.16);
+  color: rgba(107, 114, 128, 0.95);
+}
+.cron-badge-pending {
+  background: rgba(37, 99, 235, 0.14);
+  color: #2563eb;
+}
+.cron-badge-running {
+  background: rgba(37, 99, 235, 0.18);
+  color: #1d4ed8;
+}
+.cron-badge-success {
+  background: rgba(22, 163, 74, 0.14);
+  color: #16a34a;
+}
+.cron-badge-failed,
+.cron-badge-denied {
+  background: rgba(220, 38, 38, 0.14);
+  color: #dc2626;
+}
+.cron-badge-missed {
+  background: rgba(217, 119, 6, 0.16);
+  color: #d97706;
+}
+.cron-badge-skipped,
+.cron-badge-interrupted {
+  background: rgba(107, 114, 128, 0.16);
+  color: rgba(107, 114, 128, 0.95);
+}
+.cron-schedule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.cron-schedule code {
+  font-family: Consolas, 'Courier New', monospace;
+  background: rgba(79, 70, 229, 0.1);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+.cron-tz,
+.cron-catchup {
+  opacity: 0.75;
+}
+.cron-next {
+  font-family: Consolas, 'Courier New', monospace;
+}
+.cron-prompt {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.cron-preauth {
+  margin-top: 6px;
+  font-size: 11.5px;
+  opacity: 0.75;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.cron-preauth-chip {
+  font-family: Consolas, 'Courier New', monospace;
+  background: rgba(107, 114, 128, 0.14);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+.cron-pause-reason {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #dc2626;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.cron-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.cron-actions .btn {
+  margin-top: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.cron-actions .cron-del:hover:not(:disabled) {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+/* 运行历史（展开区） */
+.cron-runs {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(107, 114, 128, 0.35);
+}
+.cron-runs-title {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.8;
+  margin-bottom: 6px;
+}
+.cron-runs-empty {
+  font-size: 12px;
+  opacity: 0.6;
+  padding: 6px 0;
+}
+.cron-run {
+  border: 1px solid rgba(107, 114, 128, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+.cron-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  opacity: 0.9;
+}
+.cron-run-time {
+  font-family: Consolas, 'Courier New', monospace;
+}
+.cron-run-attempt {
+  opacity: 0.7;
+}
+.cron-run-elapsed {
+  opacity: 0.7;
+  font-family: Consolas, 'Courier New', monospace;
+}
+.cron-run-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #dc2626;
+  line-height: 1.7;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.cron-run-output {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: rgba(107, 114, 128, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+  font-family: inherit;
+}
+
 /* ===== 阶段 7：工具审批浮层 / 能力提示 / 工具状态行 ===== */
 
 /* 全屏半透明遮罩 + 居中卡片（无请求时不渲染，见 agent/ApprovalDialog.tsx） */

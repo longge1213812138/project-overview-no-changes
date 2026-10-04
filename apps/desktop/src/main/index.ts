@@ -21,6 +21,7 @@ import {
   toggleFloat
 } from './windows'
 import { initChat, shutdownChat } from './chat'
+import { initCron, shutdownCron } from './cron'
 import { shutdownMcp } from './mcp'
 import { registerHotkeys, unregisterHotkeys } from './hotkeys'
 
@@ -87,6 +88,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpcHandlers()
     initSidecar()
     initChat()
+    initCron() // 阶段 9：恢复调度状态 + 启动 10s tick（需在 initChat 注册工具之后）
     registerHotkeys()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
@@ -107,7 +109,8 @@ app.on('before-quit', (event) => {
   }
   shuttingDown = true
   event.preventDefault()
-  log.info('[app] 退出中：收日程/通知 → 停网关')
+  log.info('[app] 退出中：收定时任务/日程/通知 → 停网关')
+  shutdownCron() // 阶段 9：停 tick + 中止执行中的运行（running → interrupted）
   shutdownNotifyLoop()
   shutdownChat()
   shutdownMcp() // 阶段 8：树杀 MCP 子进程（防孤儿；幂等）

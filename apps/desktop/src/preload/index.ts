@@ -13,6 +13,11 @@ import type {
   ChatDeltaEvent,
   ChatDoneEvent,
   ConfigureResult,
+  CronActionResult,
+  CronCreateInput,
+  CronListResult,
+  CronRun,
+  CronUpdateInput,
   DiagnosticsExportResult,
   EventListFilter,
   EventRecord,
@@ -124,6 +129,22 @@ contextBridge.exposeInMainWorld(
       disconnect: (name: string): Promise<McpActionResult> =>
         ipcRenderer.invoke(IPC.mcpDisconnect, name),
       onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.mcpChanged, () => cb())
+    },
+
+    // ===== 阶段 9：cron 定时任务（任务 CRUD + 运行历史 + 变更广播） =====
+    cron: {
+      list: (): Promise<CronListResult> => ipcRenderer.invoke(IPC.cronList),
+      runs: (taskId: string, limit?: number): Promise<CronRun[]> =>
+        ipcRenderer.invoke(IPC.cronRuns, taskId, limit),
+      create: (input: CronCreateInput): Promise<CronActionResult> =>
+        ipcRenderer.invoke(IPC.cronCreate, input),
+      update: (id: string, patch: CronUpdateInput): Promise<CronActionResult> =>
+        ipcRenderer.invoke(IPC.cronUpdate, id, patch),
+      setEnabled: (id: string, enabled: boolean): Promise<CronActionResult> =>
+        ipcRenderer.invoke(IPC.cronSetEnabled, id, enabled),
+      remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.cronRemove, id),
+      trigger: (id: string): Promise<CronActionResult> => ipcRenderer.invoke(IPC.cronTrigger, id),
+      onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.cronChanged, () => cb())
     },
 
     // 'gateway:state' 为阶段 2 遗留通道（不在 IPC 常量表，保持兼容）

@@ -136,12 +136,12 @@ describe('迁移 v2：memories + memory_fts', () => {
 });
 
 describe('迁移 v3：events（日程）', () => {
-  it('首次建库即 v3：events 表 + idx_events_remind 索引，schema_version=LATEST(3)', () => {
+  it('首次建库即 v3：events 表 + idx_events_remind 索引，schema_version=LATEST', () => {
     const db = openKeep(freshDb());
 
     const version = db.prepare("SELECT v FROM kv WHERE k = 'schema_version'").get() as { v: string };
     expect(version.v).toBe(String(LATEST_SCHEMA_VERSION));
-    expect(LATEST_SCHEMA_VERSION).toBe(3);
+    expect(LATEST_SCHEMA_VERSION).toBeGreaterThanOrEqual(3);
 
     const tables = (
       db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'events'").all() as Array<{
@@ -206,14 +206,102 @@ describe('迁移 v3：events（日程）', () => {
     expect(tables).toEqual(expect.arrayContaining(['events']));
   });
 
-  it('schema_version=4（LATEST+1）拒开且不覆盖数据', () => {
+  it('LATEST+1 拒开且不覆盖数据', () => {
     const FUTURE_SCHEMA_VERSION = LATEST_SCHEMA_VERSION + 1;
-    expect(FUTURE_SCHEMA_VERSION).toBe(4);
     const dbPath = freshDb();
     const setup = openKeep(dbPath);
     setup.prepare("UPDATE kv SET v = ? WHERE k = 'schema_version'").run(String(FUTURE_SCHEMA_VERSION));
     setup.close();
 
     expect(() => openDatabase(dbPath)).toThrow(new RegExp(String(FUTURE_SCHEMA_VERSION)));
+  });
+});
+
+describe('迁移 v4：cron_tasks / cron_runs（阶段 9 定时任务）', () => {
+  it('首次建库即 v4：两表 + 三个索引齐全，schema_version=LATEST(4)', () => {
+    const db = openKeep(freshDb());
+
+    const version = db.prepare("SELECT v FROM kv WHERE k = 'schema_version'").get() as { v: string };
+    expect(version.v).toBe(String(LATEST_SCHEMA_VERSION));
+    expect(LATEST_SCHEMA_VERSION).toBe(4);
+
+    const tables = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('cron_tasks', 'cron_runs')")
+        .all() as Array<{ name: string }>
+    ).map((r) => r.name);
+    expect(tables.sort()).toEqual(['cron_runs', 'cron_tasks']);
+
+    const indexes = (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_cron_tasks_due', 'idx_cron_runs_task', 'idx_cron_runs_due')"
+        )
+        .all() as Array<{ name: string }>
+    ).map((r) => r.name);
+    expect(indexes.sort()).toEqual(['idx_cron_runs_due', 'idx_cron_runs_task', 'idx_cron_tasks_due']);
+
+    // 幂等键：同任务同计划时刻只能有一行（重复触发/重启恢复 at-once）
+    db.prepare(
+      `INSERT INTO cron_tasks(id, name, prompt, schedule, timezone, created_at, updated_at)
+       VALUES('t1', 'n', 'p', '0 9 * * *', 'UTC', 1, 1)`
+    ).run();
+    db.prepare(
+      `INSERT INTO cron_runs(task_id, scheduled_for, status, created_at) VALUES('t1', 1000, 'pending', 1)`
+    ).run();
+    expect(() =>
+      db
+        .prepare(`INSERT INTO cron_runs(task_id, scheduled_for, status, created_at) VALUES('t1', 1000, 'pending', 1)`)
+        .run()
+    ).toThrow(/UNIQUE/i);
+  });
+
+  it('二次 open 幂等：表/索引不重复、cron 数据不丢不重', () => {
+    const dbPath = freshDb();
+    const db1 = openKeep(dbPath);
+    db1
+      .prepare(
+        `INSERT INTO cron_tasks(id, name, prompt, schedule, timezone, created_at, updated_at)
+         VALUES('t1', 'n', 'p', '0 9 * * *', 'UTC', 1, 1)`
+      )
+      .run();
+
+    openKeep(dbPath);
+    const db3 = openKeep(dbPath);
+
+    const indexes = (
+      db3
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_cron%'")
+        .all() as Array<{ name: string }>
+    ).map((r) => r.name);
+    expect(indexes.sort()).toEqual(['idx_cron_runs_due', 'idx_cron_runs_task', 'idx_cron_tasks_due']);
+    const rows = db3.prepare('SELECT id FROM cron_tasks').all() as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toEqual(['t1']);
+    const version = db3.prepare("SELECT v FROM kv WHERE k = 'schema_version'").get() as { v: string };
+    expect(version.v).toBe(String(LATEST_SCHEMA_VERSION));
+  });
+
+  it('v3 老库（schema_version=3）重开 → 自动补迁到 v4 且 v3 数据保留', () => {
+    const dbPath = freshDb();
+    const v3 = migrations.filter((m) => m.version <= 3);
+    const old = openKeep(dbPath);
+    for (const step of v3) step.up(old);
+    old.prepare("UPDATE kv SET v = '3' WHERE k = 'schema_version'").run();
+    old
+      .prepare('INSERT INTO events(title, notes, remind_at, done, fired, created_at) VALUES(?, ?, ?, 0, 0, ?)')
+      .run('交周报', null, 1000, 1);
+    old.close();
+
+    const db = openKeep(dbPath);
+    const version = db.prepare("SELECT v FROM kv WHERE k = 'schema_version'").get() as { v: string };
+    expect(version.v).toBe(String(LATEST_SCHEMA_VERSION));
+    const events = db.prepare('SELECT title FROM events').all() as Array<{ title: string }>;
+    expect(events.map((e) => e.title)).toEqual(['交周报']);
+    const tables = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cron_tasks'").all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name);
+    expect(tables).toEqual(['cron_tasks']);
   });
 });

@@ -5,19 +5,21 @@ import ApprovalDialog from './agent/ApprovalDialog'
 import CalendarPanel from './calendar/CalendarPanel'
 import ChatPane from './chat/ChatPane'
 import SessionSidebar from './chat/SessionSidebar'
+import CronPanel from './cron/CronPanel'
 import MemoryPanel from './memory/MemoryPanel'
 
 /**
- * 阶段 3：主窗口 = 顶栏（logo + 版本）→ 中部内容区 → 底部 tab（聊天/日程/记忆/设置）。
+ * 阶段 3：主窗口 = 顶栏（logo + 版本）→ 中部内容区 → 底部 tab（聊天/日程/记忆/定时/设置）。
  * 浮窗模式（?float=1，main/windows.ts 载入）= 仅聊天面板（快速会话 QUICK_SESSION_ID），
  * 无侧栏无 tab，底部一行快捷键提示（Esc 由 main 侧 before-input-event 处理）。
  */
-type Tab = 'chat' | 'calendar' | 'memory' | 'settings'
+type Tab = 'chat' | 'calendar' | 'memory' | 'cron' | 'settings'
 
 const TABS: { key: Tab; label: string; phase: string }[] = [
   { key: 'chat', label: '聊天', phase: '阶段 3' },
   { key: 'calendar', label: '日程', phase: '阶段 5' },
   { key: 'memory', label: '记忆', phase: '阶段 4' },
+  { key: 'cron', label: '定时', phase: '阶段 9' },
   { key: 'settings', label: '设置', phase: '阶段 2' }
 ]
 
@@ -72,6 +74,7 @@ function MainWindow() {
         )}
         {tab === 'calendar' && <CalendarPanel />}
         {tab === 'memory' && <MemoryPanel />}
+        {tab === 'cron' && <CronPanel />}
         {tab === 'settings' && <SettingsTab />}
       </main>
 

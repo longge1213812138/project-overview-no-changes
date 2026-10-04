@@ -24,7 +24,12 @@ const WEB_UNSAFE_EXPORTS = [
   // 阶段 8：MCP stdio 客户端（child_process 同样不许进 renderer）
   'McpClient',
   'buildMcpRegistrations',
-  'killTree'
+  'killTree',
+  // 阶段 9：cron 调度持久化与授权链（SQLite / main 编排面不许进 renderer）
+  'createCronStore',
+  'createCronAuthorizer',
+  'planTrigger',
+  'planRecovery'
 ];
 
 describe('renderer 入口隔离（index.web）', () => {
@@ -40,6 +45,8 @@ describe('renderer 入口隔离（index.web）', () => {
     expect(mainEntry).toHaveProperty('runSkillTool');
     expect(mainEntry).toHaveProperty('discoverSkills');
     expect(mainEntry).toHaveProperty('buildSkillRegistrations');
+    expect(mainEntry).toHaveProperty('createCronStore');
+    expect(mainEntry).toHaveProperty('createCronAuthorizer');
   });
 
   it('web-safe 面仍可用：运行时/审批策略/类型契约可达', () => {
