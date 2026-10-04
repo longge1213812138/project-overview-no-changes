@@ -3,7 +3,7 @@
  * preload 按 FairyApi 暴露 window.fairy；renderer 不直接 import electron。
  */
 
-import type { AgentApprovalRequest, AgentToolNotice } from './agent/registry';
+import type { AgentApprovalRequest, AgentToolNotice, ToolRisk } from './agent/registry';
 
 /** DeepSeek 账号配置（v0.2.11 账号池模式，明文存 %APPDATA%/fairy/config.json，阶段 6 上 DPAPI） */
 export interface GatewayAccountConfig {
@@ -101,6 +101,17 @@ export interface FairyApi {
     getPendingApprovals(): Promise<AgentApprovalRequest[]>;
     /** 工具执行状态（可观测；日志真源在 main） */
     onToolNotice(cb: (notice: AgentToolNotice) => void): () => void;
+  };
+  /** 阶段 8：Skill 扩展（设置页列表/启用/重扫；工具本身仍走 agent 审批链） */
+  skills: {
+    /** 技能列表（含加载错误：error 非空 = 整包拒绝、原因可见） */
+    list(): Promise<SkillListItem[]>;
+    /** 启用/禁用：启用需 manifest 完整可加载（校验失败返回 {ok:false,error}） */
+    setEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; error?: string }>;
+    /** 重新扫描 skills 目录并重新装配 */
+    reload(): Promise<SkillListItem[]>;
+    /** 技能状态变化（启用/禁用/重扫）后刷新 */
+    onChanged(cb: () => void): () => void;
   };
   /** 仅允许 http/https（main 侧校验） */
   openExternal(url: string): Promise<void>;
@@ -276,7 +287,16 @@ export const IPC = {
   /** main → renderer：对账指令（summon 后补发，renderer 收到立即 getPending 校准） */
   agentApprovalSyncReq: 'agent:approvalSyncReq',
   /** main → renderer：工具执行状态（requested/denied/started/completed/failed） */
-  agentToolNotice: 'agent:toolNotice'
+  agentToolNotice: 'agent:toolNotice',
+  // ===== 阶段 8：Skill 扩展（发现/启用/变更广播） =====
+  /** renderer → main：拉取技能列表（含加载错误） */
+  skillsList: 'skills:list',
+  /** renderer → main：启用/禁用技能（启用记录内容指纹；成功后广播 skills:changed） */
+  skillsSetEnabled: 'skills:setEnabled',
+  /** renderer → main：重新扫描技能目录并装配 */
+  skillsReload: 'skills:reload',
+  /** main → renderer：技能列表/状态已变化 */
+  skillsChanged: 'skills:changed'
 } as const;
 
 // ===== 阶段 4：记忆类型 =====
@@ -305,6 +325,39 @@ export interface MemoryImportResult {
   imported: number;
   skipped: number;
   errors: string[];
+}
+
+// ===== 阶段 8：Skill 扩展 =====
+
+/** 技能包内单个工具的展示摘要 */
+export interface SkillToolSummary {
+  name: string;
+  description: string;
+  risk: ToolRisk;
+  /** 单次执行超时（毫秒） */
+  timeoutMs: number;
+}
+
+/** 设置页技能列表项（main 扫描 + 配置状态合并后的视图） */
+export interface SkillListItem {
+  /** manifest.name（解析失败时为目录名） */
+  name: string;
+  /** 技能包目录绝对路径（设置页展示定位用） */
+  dir: string;
+  version: string;
+  description: string;
+  /** 来源自述（作者/主页/URL/local） */
+  source: string;
+  permissions: string[];
+  tools: SkillToolSummary[];
+  enabled: boolean;
+  /**
+   * 内容已变更（启用时记录的指纹与当前不符）：
+   * 已被自动禁用，需用户确认后重新启用。
+   */
+  changed: boolean;
+  /** 加载/校验错误（非空 = 整包拒绝，原因可见） */
+  error?: string;
 }
 
 // ===== 通道选择（OpenAI 兼容 API / DeepSeek 网页）=====

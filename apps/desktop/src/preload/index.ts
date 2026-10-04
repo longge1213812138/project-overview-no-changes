@@ -25,6 +25,7 @@ import type {
   MemoryRecord,
   MessageDto,
   SessionMeta,
+  SkillListItem,
   TabKey,
   TestChatResult
 } from '@fairy/core'
@@ -99,6 +100,15 @@ contextBridge.exposeInMainWorld(
         ipcRenderer.invoke(IPC.agentApprovalGetPending),
       onToolNotice: (cb: (notice: AgentToolNotice) => void): (() => void) =>
         onEvent<AgentToolNotice>(IPC.agentToolNotice, cb)
+    },
+
+    // ===== 阶段 8：Skill 扩展（设置页列表/启用/重扫；工具执行仍走 agent 审批链） =====
+    skills: {
+      list: (): Promise<SkillListItem[]> => ipcRenderer.invoke(IPC.skillsList),
+      setEnabled: (name: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke(IPC.skillsSetEnabled, name, enabled),
+      reload: (): Promise<SkillListItem[]> => ipcRenderer.invoke(IPC.skillsReload),
+      onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.skillsChanged, () => cb())
     },
 
     // 'gateway:state' 为阶段 2 遗留通道（不在 IPC 常量表，保持兼容）

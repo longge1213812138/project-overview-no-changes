@@ -59,6 +59,7 @@ import {
 } from './channel'
 import { isAutoStartEnabled, setAutoStart } from './autostart'
 import { exportDiagnostics, openLogsDir } from './diagnostics'
+import { listSkills, rescanSkills, setSkillEnabled } from './skills'
 
 let tray: Tray | null = null
 let normalIcon: Electron.NativeImage | null = null
@@ -282,6 +283,15 @@ export function registerIpcHandlers(): void {
   )
   /** 权威对账：renderer 挂载/新请求到达/提交被忽略时拉取真正 pending 的审批 */
   ipcMain.handle(IPC.agentApprovalGetPending, () => getPendingApprovals())
+
+  // ===== 阶段 8：Skill 扩展（列表/启用/重扫；成功变更由 skills.ts 广播 skills:changed） =====
+  ipcMain.handle(IPC.skillsList, () => listSkills())
+  ipcMain.handle(IPC.skillsSetEnabled, (_event, name: unknown, enabled: unknown) => {
+    if (typeof name !== 'string' || name === '') throw new Error('技能名必须是非空字符串')
+    if (typeof enabled !== 'boolean') throw new Error('enabled 必须是布尔值')
+    return setSkillEnabled(name, enabled)
+  })
+  ipcMain.handle(IPC.skillsReload, () => rescanSkills())
 
   // ===== 阶段 4：记忆（面板 CRUD；add/update/remove/import 成功后广播 memoryChanged） =====
   ipcMain.handle(IPC.memoryList, (_event, filter?: unknown) =>

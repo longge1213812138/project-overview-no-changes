@@ -6,6 +6,7 @@ import type {
   ConfigureResult,
   GatewayAccountConfig,
   GatewayState,
+  SkillListItem,
   TestChatResult
 } from '@fairy/core'
 
@@ -559,6 +560,9 @@ export default function SettingsTab() {
 
       {/* ===== E. 应用设置（阶段 6 打包硬化）：开机自启 / 日志 / 诊断导出 ===== */}
       <AppSettingsSection />
+
+      {/* ===== F. 技能 Skill（阶段 8 / DEV_PLAN §5.8）：列表 + 启用/禁用 + 重扫 ===== */}
+      <SkillsSection />
     </div>
   )
 }
@@ -643,6 +647,133 @@ function AppSettingsSection() {
           打开日志目录
         </button>
       </div>
+      {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
+    </section>
+  )
+}
+
+/** risk → 中文徽标文案（与审批对话框一致） */
+const SKILL_RISK_LABEL: Record<string, string> = { read: '只读', write: '写入', exec: '执行' }
+
+/**
+ * F. 技能 Skill（阶段 8 / DEV_PLAN §5.8）：
+ * 列表（名称/版本/来源/声明权限/工具/错误可见）+ 启用/禁用 + 重新扫描。
+ * 安全提示直出：新发现默认禁用、内容变更自动停用、启用后每次调用仍逐一审批。
+ */
+function SkillsSection() {
+  const [items, setItems] = useState<SkillListItem[] | null>(null)
+  /** busy = 'reload' 或正在切换的技能名 */
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<Feedback | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setItems(await window.fairy.skills.list())
+    } catch (e) {
+      setMsg({ kind: 'err', text: `读取技能列表失败：${String(e)}` })
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    // main 广播（启用/禁用/重扫后）→ 全窗口同步刷新
+    return window.fairy.skills.onChanged(() => void refresh())
+  }, [refresh])
+
+  const handleToggle = async (name: string, enabled: boolean): Promise<void> => {
+    setBusy(name)
+    setMsg(null)
+    try {
+      const res = await window.fairy.skills.setEnabled(name, enabled)
+      if (res.ok) {
+        setMsg({
+          kind: 'ok',
+          text: enabled
+            ? `已启用 ${name}：其工具进入统一审批链（每次调用均需在弹窗中确认）`
+            : `已禁用 ${name}`
+        })
+      } else {
+        setMsg({ kind: 'err', text: `${enabled ? '启用' : '禁用'}失败：${res.error ?? '未知错误'}` })
+      }
+      await refresh()
+    } catch (e) {
+      setMsg({ kind: 'err', text: `操作失败：${String(e)}` })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleReload = async (): Promise<void> => {
+    setBusy('reload')
+    setMsg(null)
+    try {
+      setItems(await window.fairy.skills.reload())
+      setMsg({ kind: 'ok', text: '已重新扫描技能目录' })
+    } catch (e) {
+      setMsg({ kind: 'err', text: `重新扫描失败：${String(e)}` })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <section className="skills-settings">
+      <h3>技能（Skill）</h3>
+      <p className="section-hint">
+        把技能包放入 <code>%APPDATA%\fairy\skills\&lt;目录&gt;\</code>（含 skill.json）。新发现的技能默认禁用；
+        包内容一变会自动停用、需重新启用；启用后其工具仍<strong>每次调用逐一审批</strong>，审批框展示「扩展」徽标与
+        来源/声明权限。应用不提供任何网络安装来源。
+      </p>
+      <div className="skills-head">
+        <button className="btn" onClick={() => void handleReload()} disabled={busy !== null}>
+          {busy === 'reload' ? '扫描中…' : '重新扫描'}
+        </button>
+      </div>
+      {items !== null && items.length === 0 && (
+        <p className="section-hint">尚未发现技能包（目录已就绪；放入技能包后点「重新扫描」）。</p>
+      )}
+      <ul className="skills-list">
+        {items?.map((s) => (
+          <li key={s.dir} className={`skill-row${s.error !== undefined ? ' skill-row-error' : ''}`}>
+            <div className="skill-main">
+              <span className="skill-name">{s.name}</span>
+              <span className="skill-version">v{s.version}</span>
+              {s.error === undefined && (
+                <span className={`skill-flag${s.enabled ? ' flag-on' : ''}`}>
+                  {s.enabled ? '已启用' : '已禁用'}
+                </span>
+              )}
+              {s.changed && <span className="skill-flag flag-changed">内容已变更</span>}
+            </div>
+            {s.error !== undefined ? (
+              <p className="skill-error-text">加载失败（整包拒绝）：{s.error}</p>
+            ) : (
+              <>
+                <p className="skill-desc">{s.description}</p>
+                <p className="skill-meta">
+                  来源：{s.source}
+                  {s.permissions.length > 0 ? ` · 声明权限：${s.permissions.join('、')}` : ' · 声明权限：无'}
+                </p>
+                <p className="skill-meta">
+                  工具：
+                  {s.tools.length === 0
+                    ? '无'
+                    : s.tools.map((t) => `${t.name}（${SKILL_RISK_LABEL[t.risk] ?? t.risk}）`).join('、')}
+                </p>
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={s.enabled}
+                    disabled={busy !== null}
+                    onChange={(e) => void handleToggle(s.name, e.target.checked)}
+                  />
+                  <span>{s.changed ? '启用（内容已变更，需你确认）' : '启用此技能'}</span>
+                </label>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
       {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
     </section>
   )

@@ -54,6 +54,7 @@ import type {
 } from '@fairy/core'
 import { cancelAllPending, requestApproval } from './agent-approval'
 import { getToolRegistry, initAgentTools, probeToolsSupportCached } from './agent-tools'
+import { initSkills } from './skills'
 import { resolveActiveChannel } from './channel'
 import type { ActiveChannel } from './channel'
 import { getEventStore } from './events'
@@ -78,6 +79,7 @@ let active: { sessionId: string; controller: AbortController } | null = null
 export function initChat(): void {
   if (store) return
   initAgentTools() // 阶段 7：建 %APPDATA%/fairy/workspace 并注册内置工具（幂等）
+  initSkills() // 阶段 8：扫描技能目录，启用的 skill 工具注册进同一注册表（幂等）
   const dbPath = join(app.getPath('userData'), 'fairy.db')
   store = createSessionStore({ dbPath })
   store.ensureQuickSession() // 浮窗固定快速会话（QUICK_SESSION_ID）

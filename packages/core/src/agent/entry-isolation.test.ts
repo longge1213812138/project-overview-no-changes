@@ -15,7 +15,12 @@ const WEB_UNSAFE_EXPORTS = [
   'createWorkspaceFilesTool',
   'createClockTool',
   'resolveWorkspacePath',
-  'ALLOWED_COMMANDS'
+  'ALLOWED_COMMANDS',
+  // 阶段 8：Skill 执行器/发现（child_process/fs 同样不许进 renderer）
+  'runSkillTool',
+  'discoverSkills',
+  'buildSkillRegistrations',
+  'parseSkillManifest'
 ];
 
 describe('renderer 入口隔离（index.web）', () => {
@@ -28,6 +33,9 @@ describe('renderer 入口隔离（index.web）', () => {
   it('main 完整入口持有执行器与装配函数（对照面）', () => {
     expect(mainEntry).toHaveProperty('createBuiltinTools');
     expect(mainEntry).toHaveProperty('createShellTool');
+    expect(mainEntry).toHaveProperty('runSkillTool');
+    expect(mainEntry).toHaveProperty('discoverSkills');
+    expect(mainEntry).toHaveProperty('buildSkillRegistrations');
   });
 
   it('web-safe 面仍可用：运行时/审批策略/类型契约可达', () => {

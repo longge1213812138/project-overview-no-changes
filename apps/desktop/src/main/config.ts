@@ -36,6 +36,20 @@ export interface FairyConfig {
   channel?: ChannelKind | null
   /** OpenAI 兼容 API 供应商配置（baseUrl/apiKey/model；apiKey 走 DPAPI）；缺省 = 未配置 */
   api?: ApiChannelConfig
+  /**
+   * 阶段 8：Skill 启用状态（key = manifest.name）。
+   * enabled = 用户显式启用（新发现恒 false，默认禁用）；
+   * fingerprint = 启用时的内容指纹（manifest+entry 脚本 sha256）——
+   * 内容一变即识别为「已变更」自动回禁用，需重新启用。
+   */
+  skills?: Record<string, SkillStateEntry>
+}
+
+/** 单个技能的启用状态（config.json 明文字段，无凭据） */
+export interface SkillStateEntry {
+  enabled: boolean
+  /** 启用时记录的内容指纹；'' = 从未启用 */
+  fingerprint: string
 }
 
 /** config.json 的明文部分（密件字段一律不落这里） */
@@ -43,6 +57,7 @@ interface PlaintextConfig {
   gatewayBin?: string
   channel?: ChannelKind | null
   api?: { baseUrl: string; model: string }
+  skills?: Record<string, SkillStateEntry>
 }
 
 /** 本机已知 ds-free-api 安装目录（docs/llm-bridge-notes.md §2/§6，阶段 2 探测位 ②） */
@@ -126,6 +141,19 @@ function normalizeApi(baseUrl: unknown, apiKey: unknown, model: unknown): ApiCha
   return { baseUrl: b, apiKey: k, model: m }
 }
 
+/** skills 状态归一：仅接受 {enabled:boolean, fingerprint:string} 形状，脏数据丢弃 */
+function normalizeSkills(raw: unknown): Record<string, SkillStateEntry> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const out: Record<string, SkillStateEntry> = {}
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof name !== 'string' || name === '' || typeof value !== 'object' || value === null) continue
+    const entry = value as Record<string, unknown>
+    if (typeof entry.enabled !== 'boolean' || typeof entry.fingerprint !== 'string') continue
+    out[name] = { enabled: entry.enabled, fingerprint: entry.fingerprint }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 /** 合并明文 config.json 与 DPAPI 密件 → 内存视图（apiKey 缺失就补一个新的） */
 function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
   const cfg: FairyConfig = {
@@ -136,6 +164,8 @@ function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
   if (secrets.account) cfg.account = secrets.account
   const api = normalizeApi(plain.api?.baseUrl, secrets.apiApiKey, plain.api?.model)
   if (api) cfg.api = api
+  const skills = normalizeSkills(plain.skills)
+  if (skills) cfg.skills = skills
   return cfg
 }
 
@@ -144,6 +174,7 @@ function strip(cfg: FairyConfig): PlaintextConfig {
   const plain: PlaintextConfig = { channel: cfg.channel ?? null }
   if (cfg.gatewayBin) plain.gatewayBin = cfg.gatewayBin
   if (cfg.api) plain.api = { baseUrl: cfg.api.baseUrl, model: cfg.api.model }
+  if (cfg.skills && Object.keys(cfg.skills).length > 0) plain.skills = cfg.skills
   return plain
 }
 
@@ -205,7 +236,8 @@ export function loadConfig(): FairyConfig {
                 baseUrl: typeof legacyApi['baseUrl'] === 'string' ? legacyApi['baseUrl'] : '',
                 model: typeof legacyApi['model'] === 'string' ? legacyApi['model'] : ''
               }
-            : undefined
+            : undefined,
+        skills: normalizeSkills(o['skills'])
       }
       const cfg = assemble(plain, secrets)
       if (migrated) {

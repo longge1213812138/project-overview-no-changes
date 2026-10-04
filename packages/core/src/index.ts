@@ -19,3 +19,4 @@ export * from './calendar';
 export * from './intent';
 export * from './agent';
 export * from './agent/tools';
+export * from './agent/skill';

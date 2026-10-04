@@ -263,6 +263,44 @@ body {
   cursor: pointer;
 }
 .toggle-row input { width: 15px; height: 15px; }
+
+/* ===== 阶段 8：技能（Skill）列表 ===== */
+.skills-settings { margin-top: 10px; }
+.skills-head { display: flex; gap: 8px; margin-top: 8px; }
+.skills-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skill-row {
+  border: 1px solid rgba(107, 114, 128, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.skill-row-error { border-color: #dc2626; }
+.skill-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.skill-name { font-weight: 600; }
+.skill-version { font-size: 12px; color: #6b7280; }
+.skill-flag {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.15);
+  color: #4b5563;
+}
+.skill-flag.flag-on { background: #dcfce7; color: #15803d; }
+.skill-flag.flag-changed { background: #fef3c7; color: #92400e; }
+.skill-desc { margin: 6px 0 2px; font-size: 13px; }
+.skill-meta { margin: 2px 0; font-size: 12px; color: #6b7280; }
+.skill-error-text { margin: 6px 0 0; font-size: 13px; color: #dc2626; }
 .app-actions { display: flex; gap: 8px; margin-top: 8px; }
 .app-actions .btn { margin-top: 0; }
 
