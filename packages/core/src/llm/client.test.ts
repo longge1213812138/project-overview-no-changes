@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createLlmClient } from './index';
-import { LlmAuthError, LlmError, SessionExpiredError } from './errors';
+import { LlmAuthError, LlmError } from './errors';
 
 let server: http.Server;
 let port = 0;
@@ -73,12 +73,13 @@ describe('chatOnce', () => {
     expect(requestCount).toBe(1);
   });
 
-  it('持续 429 overloaded → SessionExpiredError（重试 3 次后）', async () => {
+  it('持续 429（含 overloaded）→ 常规退避重试后抛 LlmError（不伪装成功）', async () => {
     handler = (_req, res) =>
       json(res, 429, { error: { message: 'service overloaded', type: 'server_error', code: 'overloaded' } });
-    await expect(client().chatOnce([{ role: 'user', content: 'x' }])).rejects.toBeInstanceOf(
-      SessionExpiredError
-    );
+    await expect(client().chatOnce([{ role: 'user', content: 'x' }])).rejects.toMatchObject({
+      name: 'LlmError',
+      status: 429
+    });
     expect(requestCount).toBe(4); // 1 次原始 + 3 次重试
   });
 
@@ -209,7 +210,7 @@ describe('streamChat', () => {
     expect(reasons).toEqual(['思考']);
   });
 
-  it('流式请求先 429 overloaded 再成功（建流前可重试）', async () => {
+  it('流式请求先 429 再成功（建流前可重试）', async () => {
     let calls = 0;
     handler = (_req, res) => {
       calls++;

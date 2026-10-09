@@ -10,8 +10,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run --passWithNoTests",
-    "stage:extras": "node scripts/stage-extras.mjs",
-    "package:win": "node scripts/stage-extras.mjs && electron-vite build && electron-builder --win"
+    "package:win": "electron-vite build && electron-builder --win"
   },
   "dependencies": {
     "@fairy/core": "workspace:*",
@@ -25,6 +24,8 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -32,6 +33,7 @@
     "electron": "^39.8.10",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "jsdom": "^30.1.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"

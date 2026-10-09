@@ -9,16 +9,10 @@ files:
 # better-sqlite3 v13 自带 N-API prebuilds（ABI 稳定，node/electron 通用），
 # 无需 electron-rebuild（本机无 VS Build Tools，重建会直接报错）
 npmRebuild: false
-# extraResources：图标（托盘红图标由 main 按进程路径解析）+ ds-free-api 网关二进制
-# （resources/ds-free-api/ 由 scripts/stage-extras.mjs 从本机网关目录/FAIRY_GATEWAY_DIR 预置，
-#   不入 git；打包前 package:win 会自动 stage）
+# extraResources：托盘/窗口图标（main 按进程路径解析）
 extraResources:
   - from: resources/icon.png
     to: icon.png
-  - from: resources/icon-red.png
-    to: icon-red.png
-  - from: resources/ds-free-api
-    to: ds-free-api
 win:
   target:
     - nsis

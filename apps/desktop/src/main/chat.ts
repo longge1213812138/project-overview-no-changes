@@ -16,7 +16,7 @@
  * - 空闲抽取（§5.2 沉淀时机 2）：chatDone（ok 非中止）/再次发送 → 5 分钟单例定时器（extract.ts）。
  * - 广播统一走 windows.broadcast（主窗口 + 浮窗同步）。
  *
- * 依赖单向：chat → windows / sidecar / channel / extract（均不回 import chat）。
+ * 依赖单向：chat → windows / channel / extract（均不回 import chat）。
  * createSessionStore/SessionStore（阶段 3 任务 A）与 createIntentParser/createMemoryStore/
  * formatMemoryBlock/MEMORY_TOP_K（阶段 4 任务 A2）以及 createCalendarStore/CalendarStore/
  * formatEventTime/relativeDayLabel（阶段 5 任务 A4）均为 @fairy/core 冻结签名。
@@ -33,8 +33,7 @@ import {
   formatEventTime,
   formatMemoryBlock,
   relativeDayLabel,
-  runAgent,
-  SessionExpiredError
+  runAgent
 } from '@fairy/core'
 import type {
   AgentAuthorize,
@@ -64,7 +63,6 @@ import type { WebRetrieval } from './web'
 import { getEventStore } from './events'
 import { createIdleExtractor } from './extract'
 import type { IdleExtractor } from './extract'
-import { reportSessionExpired, reportSessionOk } from './sidecar'
 import { broadcast } from './windows'
 import { log } from './logger'
 
@@ -93,7 +91,7 @@ export function initChat(): void {
     memoryStore,
     listHistory: (sessionId, limit) => listHistory(sessionId, limit),
     createClient: () => {
-      // 抽取也走通道解析（api 通道同样可抽取）；通道不可用返回 null → 本次抽取跳过
+      // 抽取也走接入解析；配置不可用返回 null → 本次抽取跳过
       const active = resolveActiveChannel()
       return active.ok ? active.client : null
     },
@@ -113,7 +111,7 @@ export function getMemoryStore(): MemoryStore {
   return memoryStore
 }
 
-/** 退出前清理空闲抽取定时器（before-quit 调用，放 shutdownSidecar 旁边） */
+/** 退出前清理空闲抽取定时器（before-quit 调用，与 shutdownChat 同批） */
 export function shutdownChat(): void {
   idleExtractor?.shutdown()
   cancelAllPending('cancelled') // 阶段 7：退出时清掉悬挂审批
@@ -151,7 +149,7 @@ export function sendChat(sessionId: string, text: string): Promise<{ ok: boolean
     return Promise.resolve({ ok: false, error: '消息不能为空' })
   }
 
-  // 通道解析（§5.6，替代旧「网关 ready」检查）：未选通道 / api 配置不全 / 网关未启动 → 引导文案
+  // 接入配置解析（§5.6）：未配置 / 配置不全 → 引导文案
   const resolved = resolveActiveChannel()
   if (!resolved.ok) {
     return Promise.resolve({ ok: false, error: resolved.error })
@@ -174,7 +172,6 @@ export function sendChat(sessionId: string, text: string): Promise<{ ok: boolean
   const controller = new AbortController()
   active = { sessionId, controller }
   broadcast(IPC.chatBusy, { sessionId } satisfies ChatBusyEvent)
-  reportSessionOk() // 消息成功进入生成流水 → 清会话过期标记（托盘联动）
 
   idleExtractor?.reset(sessionId) // 再次发送 → 重置空闲抽取倒计时（进行中的抽取取消）
   void runGeneration(sessionId, messageId, text, resolved, controller.signal)
@@ -195,7 +192,7 @@ async function runGeneration(
   sessionId: string,
   messageId: number,
   text: string,
-  /** 通道解析结果（{channel, client}）：client 不再内部从 port 重建，意图解析共用同一个 */
+  /** 接入解析结果（{channel, client}）：client 一次构建，意图解析与工具循环共用同一个 */
   resolved: Extract<ActiveChannel, { ok: true }>,
   signal: AbortSignal
 ): Promise<void> {
@@ -387,33 +384,27 @@ async function runGeneration(
   }
 
   try {
-    // ===== 阶段 7 §5.7 通道门控：tools 仅 API 通道；web 不做适配（明确提示，不静默降级） =====
+    // ===== 阶段 7 §5.7 工具门控：能力探测（同 baseUrl+model 只探测一次）；
+    // LlmAuthError 不吞，冒泡进下方既有 catch 分类（与 runAgent 同一 try） =====
     let tools: AgentTool[] = []
     let authorize: AgentAuthorize | undefined
-    if (resolved.channel === 'web') {
-      capabilityHint = '当前为 DeepSeek 网页通道，工具调用仅支持 API 通道，本轮未启用工具'
+    const probe = await probeToolsSupportCached(client, resolved.capabilityKey, { signal })
+    if (probe.support === 'unsupported') {
+      capabilityHint = `当前 API 端点不支持工具调用（${probe.detail ?? '探测未通过'}），本轮未启用工具`
       log.info('[agent]', capabilityHint)
     } else {
-      // api：能力探测（同 baseUrl+model 只探测一次）；SessionExpiredError/LlmAuthError 不吞，
-      // 冒泡进下方既有 catch 分类（与 runAgent 同一 try）
-      const probe = await probeToolsSupportCached(client, resolved.capabilityKey, { signal })
-      if (probe.support === 'unsupported') {
-        capabilityHint = `当前 API 端点不支持工具调用（${probe.detail ?? '探测未通过'}），本轮未启用工具`
-        log.info('[agent]', capabilityHint)
-      } else {
-        // supported → 带工具；unknown → 同样带工具尝试（失败即可见错误，不算静默降级）
-        if (probe.support === 'unknown') {
-          log.info('[agent]', `能力探测未知（${probe.detail ?? '无详情'}），本轮带工具尝试`)
-        }
-        const registry = getToolRegistry()
-        tools = registry.list().map((r) => r.tool)
-        authorize = createRegistryAuthorizer(registry, {
-          // registry 的 confirm 负载自带 id（registry 内部 nextId 序列，每轮生成从 1
-          // 重计，与审批生命周期无关）。显式剥离后再交 requestApproval——审批 id 由
-          // agent-approval 的 seq 统一生成（曾因两者相撞导致第二次审批框不弹，H9 破案）
-          confirm: ({ id: _registryRequestId, ...req }) => requestApproval(req, { signal })
-        })
+      // supported → 带工具；unknown → 同样带工具尝试（失败即可见错误，不算静默降级）
+      if (probe.support === 'unknown') {
+        log.info('[agent]', `能力探测未知（${probe.detail ?? '无详情'}），本轮带工具尝试`)
       }
+      const registry = getToolRegistry()
+      tools = registry.list().map((r) => r.tool)
+      authorize = createRegistryAuthorizer(registry, {
+        // registry 的 confirm 负载自带 id（registry 内部 nextId 序列，每轮生成从 1
+        // 重计，与审批生命周期无关）。显式剥离后再交 requestApproval——审批 id 由
+        // agent-approval 的 seq 统一生成（曾因两者相撞导致第二次审批框不弹，H9 破案）
+        confirm: ({ id: _registryRequestId, ...req }) => requestApproval(req, { signal })
+      })
     }
 
     const agentOptions: AgentRunOptions = { signal }
@@ -485,23 +476,6 @@ async function runGeneration(
         }
       })
       emitDone({ sessionId, messageId, ok: true, aborted: true, elapsedMs })
-      return
-    }
-
-    if (err instanceof SessionExpiredError && resolved.channel === 'web') {
-      // 会话过期（持续 429 overloaded）：仅网页通道上报托盘红（§5.6.4 指纹仅对网页生效）
-      s.updateMessage(messageId, {
-        content,
-        meta: { error: err.message, ...(webSources.length > 0 ? { sources: webSources } : {}) }
-      })
-      emitDone({
-        sessionId,
-        messageId,
-        ok: false,
-        error: '会话已过期（持续 429 overloaded），请在设置页重新保存账号配置',
-        elapsedMs
-      })
-      reportSessionExpired()
       return
     }
 

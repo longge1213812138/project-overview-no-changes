@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 
 // @fairy/core 直接以 TS 源码方式引入，由 electron-vite 统一编译
 const coreSrc = join(__dirname, '../../packages/core/src/index.ts')
-// 渲染层专用安全入口：不含 gateway/（node:child_process 等），避免打包警告与浏览器端副作用
+// 渲染层专用安全入口：不含 node 内建依赖模块，避免打包警告与浏览器端副作用
 const coreSrcWeb = join(__dirname, '../../packages/core/src/index.web.ts')
 
 // 注意：@fairy/core 是 workspace 源码包，必须**内联**（exclude 外部化），

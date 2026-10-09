@@ -37,65 +37,20 @@ export interface WebSearchTestResult {
   items?: WebSourceRef[];
 }
 
-/** DeepSeek 账号配置（v0.2.11 账号池模式，明文存 %APPDATA%/fairy/config.json，阶段 6 上 DPAPI） */
-export interface GatewayAccountConfig {
-  /** 邮箱或手机号；纯数字视为手机号（area_code 默认 +86） */
-  account: string;
-  password: string;
-  /** 数美设备指纹，风控必填；取法见 docs/llm-bridge-notes.md §1 */
-  deviceId?: string;
-}
-
-export type GatewayStatus = 'stopped' | 'starting' | 'ready' | 'error';
-
-/** 账号池登录态（来自网关 stdout 日志扫描） */
-export type AccountStatus = 'none' | 'logging_in' | 'logged_in' | 'login_failed' | 'unknown';
-
-export interface GatewayState {
-  status: GatewayStatus;
-  /** 实际监听端口（随机分配时每次不同） */
-  port: number | null;
-  /** config.json 是否已配置账号 */
-  configured: boolean;
-  accountStatus: AccountStatus;
-  /** 登录失败原因（如 RISK_DEVICE_DETECTED / USER_IS_BANNED / muted） */
-  accountDetail: string | null;
-  lastError: string | null;
-}
-
-export interface ConfigureResult {
-  ok: boolean;
-  error?: string;
-  state?: GatewayState;
-}
-
 export interface TestChatResult {
   ok: boolean;
   content?: string;
-  /** 指纹命中持续 429 overloaded → 需要重新配置（托盘红 + 引导卡） */
-  expired?: boolean;
   error?: string;
 }
 
 /** preload 按此暴露 window.fairy（额外附加 name/version，见 env.d.ts） */
 export interface FairyApi {
-  gateway: {
-    getState(): Promise<GatewayState>;
-    /** 保存 DeepSeek 账号：网关运行中则热重启应用，未运行则仅保存（下次显式启动生效） */
-    configure(input: GatewayAccountConfig): Promise<ConfigureResult>;
-  };
-  /** LLM 通道选择（阶段：启动不自动登录，用户显式选择接入方式） */
+  /** 接入配置（目前仅 OpenAI 兼容 API） */
   channel: {
     get(): Promise<ChannelState>;
-    /** 保存 OpenAI 兼容 API 配置并切到 api 通道（apiKey 留空=保持已存；会自动停掉运行中的网页网关） */
+    /** 保存 OpenAI 兼容 API 配置并启用（apiKey 留空=保持已存） */
     saveApi(cfg: ApiChannelConfig): Promise<ChannelActionResult>;
-    /** 选择通道：web 不会自动启动网关；切到 api 要求 API 配置已就绪 */
-    select(channel: ChannelKind): Promise<ChannelActionResult>;
-    /** 仅 web：显式 spawn 网关（DeepSeek 登录只发生在这一步） */
-    startGateway(): Promise<ChannelActionResult>;
-    /** 停止网页网关（不影响 api 通道） */
-    stopGateway(): Promise<ChannelState>;
-    /** 按当前通道做一轮非流式测试对话 */
+    /** 按当前配置做一轮非流式测试对话 */
     test(message: string): Promise<TestChatResult>;
   };
   /**
@@ -188,8 +143,6 @@ export interface FairyApi {
   };
   /** 仅允许 http/https（main 侧校验） */
   openExternal(url: string): Promise<void>;
-  /** 订阅网关状态变化，返回退订函数 */
-  onGatewayState(cb: (state: GatewayState) => void): () => void;
 
   // ===== 阶段 3：会话 + 聊天 =====
   sessions: {
@@ -344,9 +297,6 @@ export const IPC = {
   memoryChanged: 'memory:changed',
   channelGet: 'channel:get',
   channelSaveApi: 'channel:saveApi',
-  channelSelect: 'channel:select',
-  channelStart: 'channel:start',
-  channelStop: 'channel:stop',
   channelTest: 'channel:test',
   // ===== 阶段 10：API 通道联网检索（配置 + 设置页试跑） =====
   webGet: 'web:get',
@@ -611,9 +561,9 @@ export interface CronActionResult {
   task?: CronTask;
 }
 
-// ===== 通道选择（OpenAI 兼容 API / DeepSeek 网页）=====
+// ===== 接入通道（OpenAI 兼容 API；DeepSeek 网页通道已移除）=====
 
-export type ChannelKind = 'api' | 'web';
+export type ChannelKind = 'api';
 
 export interface ApiChannelConfig {
   /** OpenAI 兼容 base，如 https://api.deepseek.com/v1 */
@@ -630,16 +580,10 @@ export interface ApiChannelConfig {
 }
 
 export interface ChannelState {
-  /** null = 尚未选择（首启/升级后，设置页展示双通道选择卡） */
+  /** null = 尚未配置（首启/升级后，设置页引导填写 API 配置） */
   channel: ChannelKind | null;
-  /** api 通道配置概况（不含 apiKey 明文；style = 接口风格） */
+  /** api 配置概况（不含 apiKey 明文；style = 接口风格） */
   api: { configured: boolean; baseUrl: string; model: string; style: ApiStyle };
-  web: {
-    /** DeepSeek 账号是否已配置（不回显明文） */
-    accountConfigured: boolean;
-    /** 网关状态；channel==='web' 且未手动启动时 status='stopped' */
-    gateway: GatewayState;
-  };
 }
 
 export interface ChannelActionResult {

@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { EventListFilter, EventRecord, ScheduleScope } from '@fairy/core'
+import { useEffect, useMemo, useState } from 'react'
+import type { EventRecord, FairyClient, Feedback, ScheduleScope } from '@fairy/core'
+import { defaultFairyClient } from '../ipc/fairyClient'
+import { useAction } from '../ipc/useAction'
+import { useResource } from '../ipc/useResource'
 
 /**
  * 阶段 5 · 日程面板（docs/DEV_PLAN.md §5.3 + 阶段 5 第 3 条）：
  * 今天/明天/全部 列表、勾选完成、手动增删（与对话意图写同一张 events 表，数据实时一致）。
- * 过期未完成只展示「已过期」徽章不补弹（§8）。数据来源：`window.fairy.events`
- * （契约见 packages/core/src/ipc.ts；today/tomorrow/all 对应 ScheduleScope）。
+ * 过期未完成只展示「已过期」徽章不补弹（§8）。
+ *
+ * 数据与写操作经 Fairy client（ADR-0001）：取数与订阅交 `useResource`，
+ * 写操作与忙碌态/反馈交 `useAction`；本组件只留展示与日程自己的规则
+ * （scope 过滤、列表排序、跨天时钟、新增表单校验）。
  */
 
 /** 面板只暴露三个 scope（ScheduleScope 另有 'week'，供意图 schedule_query 用） */
@@ -20,8 +26,11 @@ const SCOPES: { key: Scope; label: string }[] = [
 /** 单次拉取上限，防止日程量大时列表过长 */
 const LIST_LIMIT = 500
 
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+/** 契约未承诺顺序，展示层兜底：未完成在前，再按 remindAt 升序 */
+function sortEvents(list: EventRecord[]): EventRecord[] {
+  return [...list].sort((a, b) =>
+    a.done === b.done ? a.remindAt - b.remindAt || a.id - b.id : a.done ? 1 : -1
+  )
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -52,114 +61,88 @@ function toLocalInput(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export default function CalendarPanel() {
-  // ===== 列表数据 =====
-  const [scope, setScope] = useState<Scope>('today')
-  const [events, setEvents] = useState<EventRecord[]>([])
-  const [loading, setLoading] = useState(true)
+/** 按日程 id 的忙碌槽位（同一面板里多行各自的忙碌态） */
+const rowKey = (id: number) => `event:${id}`
 
-  // ===== 提示条 / pending 防重 =====
-  const [error, setError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<number | null>(null)
-  const [addBusy, setAddBusy] = useState(false)
+export interface CalendarPanelProps {
+  /** 数据源；默认取 preload 暴露的 `window.fairy`。测试传替身。 */
+  client?: FairyClient
+}
+
+export default function CalendarPanel({ client = defaultFairyClient() }: CalendarPanelProps = {}) {
+  const [scope, setScope] = useState<Scope>('today')
 
   // ===== 手动新增表单 =====
   const [title, setTitle] = useState('')
   const [remindAtInput, setRemindAtInput] = useState(() => toLocalInput(Date.now() + 3_600_000))
   const [notes, setNotes] = useState('')
 
+  const resource = useResource(
+    (c) => c.events.list({ scope, includeDone: true, limit: LIST_LIMIT }),
+    (c, refresh) => c.events.onChanged(refresh),
+    [scope],
+    client
+  )
+  const action = useAction(client)
+
+  const list = useMemo(() => sortEvents(resource.data ?? []), [resource.data])
+  /** 任一写操作进行中 → 行内与新增按钮一同禁用（与原行为一致：同一时刻只做一个写操作） */
+  const anyBusy = action.busy('add') || list.some((rec) => action.busy(rowKey(rec.id)))
+
+  /** 反馈条：最近一次 Action 的结论优先，其次资源读取失败 */
+  const notice: Feedback | null =
+    action.feedback ?? (resource.error !== null ? { kind: 'err', text: resource.error } : null)
+
   // now：30s 一跳，跨天/过期徽章不刷新页面也会更新
   const [now, setNow] = useState(() => Date.now())
-
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(t)
   }, [])
 
-  const reload = useCallback(async () => {
-    setLoading(true)
-    try {
-      const filter: EventListFilter = { scope, includeDone: true, limit: LIST_LIMIT }
-      const list = await window.fairy.events.list(filter)
-      // 契约未承诺顺序，前端兜底：未完成在前，再按 remindAt 升序
-      setEvents(
-        [...list].sort((a, b) =>
-          a.done === b.done ? a.remindAt - b.remindAt || a.id - b.id : a.done ? 1 : -1
-        )
-      )
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [scope])
-
-  // 挂载/scope 变化 → 拉列表；订阅事件变更（意图/通知轮询/面板操作广播）→ 重新拉取
-  useEffect(() => {
-    void reload()
-    return window.fairy.events.onChanged(() => {
-      void reload()
-    })
-  }, [reload])
-
   // ===== 勾选完成 / 取消完成 =====
-  const handleToggle = async (rec: EventRecord) => {
-    if (busyId !== null || addBusy) return
-    setBusyId(rec.id)
-    setError(null)
-    try {
-      await window.fairy.events.complete(rec.id, !rec.done)
-      void reload()
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusyId(null)
-    }
+  const handleToggle = (rec: EventRecord) => {
+    if (anyBusy) return
+    void action.run(rowKey(rec.id), (c) => c.events.complete(rec.id, !rec.done), {
+      onSuccess: resource.refresh
+    })
   }
 
   // ===== 删除（hover 显示按钮，confirm 二次确认） =====
-  const handleRemove = async (rec: EventRecord) => {
-    if (busyId !== null || addBusy) return
+  const handleRemove = (rec: EventRecord) => {
+    if (anyBusy) return
     if (!window.confirm(`确定删除日程「${rec.title}」？`)) return
-    setBusyId(rec.id)
-    setError(null)
-    try {
-      await window.fairy.events.remove(rec.id)
-      void reload()
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusyId(null)
-    }
+    void action.run(rowKey(rec.id), (c) => c.events.remove(rec.id), {
+      onSuccess: resource.refresh
+    })
   }
 
   // ===== 手动新增 =====
-  const handleAdd = async () => {
-    if (addBusy) return
-    const t = title.trim()
-    if (!t) {
-      setError('请填写标题')
+  const handleAdd = () => {
+    if (anyBusy) return
+    const text = title.trim()
+    if (!text) {
+      action.fail('请填写标题')
       return
     }
     // datetime-local 值（YYYY-MM-DDTHH:mm）按本地时区解析
     const ms = Date.parse(remindAtInput)
     if (!remindAtInput || !Number.isFinite(ms)) {
-      setError('请选择有效的提醒时间')
+      action.fail('请选择有效的提醒时间')
       return
     }
-    setAddBusy(true)
-    setError(null)
-    try {
-      await window.fairy.events.add({ title: t, remindAt: ms, notes: notes.trim() || undefined })
-      setTitle('')
-      setNotes('')
-      setRemindAtInput(toLocalInput(Date.now() + 3_600_000))
-      void reload()
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setAddBusy(false)
-    }
+    void action.run(
+      'add',
+      (c) => c.events.add({ title: text, remindAt: ms, notes: notes.trim() || undefined }),
+      {
+        onSuccess: () => {
+          setTitle('')
+          setNotes('')
+          setRemindAtInput(toLocalInput(Date.now() + 3_600_000))
+          return resource.refresh()
+        }
+      }
+    )
   }
 
   return (
@@ -184,7 +167,7 @@ export default function CalendarPanel() {
         className="cal-form"
         onSubmit={(e) => {
           e.preventDefault()
-          void handleAdd()
+          handleAdd()
         }}
       >
         <div className="cal-form-row">
@@ -208,17 +191,21 @@ export default function CalendarPanel() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
-          <button className="btn btn-primary" type="submit" disabled={addBusy}>
-            {addBusy ? '添加中…' : '添加'}
+          <button className="btn btn-primary" type="submit" disabled={anyBusy}>
+            {action.busy('add') ? '添加中…' : '添加'}
           </button>
         </div>
       </form>
 
-      {error && <div className="banner banner-err">{error}</div>}
+      {notice && (
+        <div className={notice.kind === 'ok' ? 'banner banner-ok' : 'banner banner-err'}>
+          {notice.text}
+        </div>
+      )}
 
-      {loading && events.length === 0 ? (
+      {resource.loading && list.length === 0 ? (
         <div className="cal-loading">日程加载中…</div>
-      ) : events.length === 0 ? (
+      ) : list.length === 0 ? (
         <div className="cal-empty">
           <div>{scope === 'today' ? '今天没有日程' : '该时间窗没有日程'}</div>
           <div className="cal-empty-hint">
@@ -227,7 +214,7 @@ export default function CalendarPanel() {
         </div>
       ) : (
         <div className="cal-list">
-          {events.map((rec) => {
+          {list.map((rec) => {
             // §8：过期且未完成 → 仅展示「已过期」，不补弹；fired 不单独出徽章
             const overdue = !rec.done && rec.remindAt < now
             return (
@@ -236,9 +223,9 @@ export default function CalendarPanel() {
                   className="cal-check"
                   type="checkbox"
                   checked={rec.done}
-                  disabled={busyId !== null || addBusy}
+                  disabled={anyBusy}
                   title={rec.done ? '取消完成' : '标记完成'}
-                  onChange={() => void handleToggle(rec)}
+                  onChange={() => handleToggle(rec)}
                 />
                 <div className="cal-time">
                   <div className="cal-time-abs">{fmtTime(rec.remindAt)}</div>
@@ -256,10 +243,10 @@ export default function CalendarPanel() {
                 <div className="cal-actions">
                   <button
                     className="btn cal-del"
-                    onClick={() => void handleRemove(rec)}
-                    disabled={busyId !== null || addBusy}
+                    onClick={() => handleRemove(rec)}
+                    disabled={anyBusy}
                   >
-                    {busyId === rec.id ? '删除中…' : '删除'}
+                    {action.busy(rowKey(rec.id)) ? '删除中…' : '删除'}
                   </button>
                 </div>
               </div>

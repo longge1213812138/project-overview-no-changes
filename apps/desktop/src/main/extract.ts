@@ -33,7 +33,7 @@ export interface IdleExtractionDeps {
   memoryStore: Pick<MemoryStore, 'add'>
   /** 目标会话最近 N 条消息（升序） */
   listHistory(sessionId: string, limit: number): MessageDto[]
-  /** 通道不可用（未选通道/网关未启动等）返回 null → 本次抽取跳过 */
+  /** 接入配置不可用（未配置/配置不全）返回 null → 本次抽取跳过 */
   createClient(): LlmClient | null
   /** 生成中（active 非空）→ 到点顺延 */
   isBusy(): boolean

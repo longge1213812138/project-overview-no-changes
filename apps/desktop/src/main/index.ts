@@ -1,7 +1,7 @@
 /**
  * 启动与生命周期（阶段 3 起瘦身：窗口/托盘状态/IPC/热键各归其位）。
  * - 窗口（主 + 浮窗）→ windows.ts；热键 → hotkeys.ts；聊天编排 → chat.ts
- * - 本文件只留：userData 初始化、托盘、单实例锁、退出时 sidecar 回收。
+ * - 本文件只留：userData 初始化、托盘、单实例锁、退出时资源回收。
  */
 import { app, BrowserWindow, Menu, Notification, Tray, nativeImage } from 'electron'
 import { join } from 'node:path'
@@ -11,8 +11,7 @@ import { initLogger, log } from './logger'
 import { AUTOSTART_RUN_NAME, isAutoStartEnabled, setAutoStart } from './autostart'
 import { initEvents } from './events'
 import { initNotifyLoop, shutdownNotifyLoop } from './notify-loop'
-import { initSidecar, shutdownSidecar } from './sidecar'
-import { registerIpcHandlers, registerTray } from './ipc'
+import { registerIpcHandlers } from './ipc'
 import {
   createFloatWindow,
   createMainWindow,
@@ -37,9 +36,6 @@ function createTray(): void {
   const image = nativeImage.createFromPath(iconPath())
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
   tray.setToolTip(`${APP_NAME} v${FAIRY_VERSION}`)
-
-  // 托盘状态更新（红图标）逻辑注入 ipc.ts，保持本文件简洁
-  registerTray(tray)
 
   const autoStart = isAutoStartEnabled()
 
@@ -71,7 +67,7 @@ function createTray(): void {
   tray.on('click', () => showMainWindow())
 }
 
-// 单实例锁：防止多开导致 sidecar/数据文件竞争
+// 单实例锁：防止多开导致数据文件竞争
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -86,7 +82,6 @@ if (!app.requestSingleInstanceLock()) {
     initEvents(join(app.getPath('userData'), 'fairy.db')) // 日程存储（独立连接同一 fairy.db，先于 IPC handler）
     initNotifyLoop() // §5.3 30s 通知轮询 + §8 启动清扫（先于 IPC handler）
     registerIpcHandlers()
-    initSidecar()
     initChat()
     initCron() // 阶段 9：恢复调度状态 + 启动 10s tick（需在 initChat 注册工具之后）
     registerHotkeys()
@@ -99,8 +94,8 @@ if (!app.requestSingleInstanceLock()) {
 // 退出前解除全局热键（globalShortcut.unregisterAll 幂等，未注册也安全）
 app.on('will-quit', () => unregisterHotkeys())
 
-// 退出前：先同步弹未触发日程提示 + 清通知轮询（尽力而为），再清空闲记忆抽取定时器，
-// 最后停掉网关子进程（防 Windows 僵尸进程）；幂等防重入，3s 兜底超时在 shutdownSidecar 内
+// 退出前：先同步弹未触发日程提示 + 清通知轮询（尽力而为），再清空闲记忆抽取定时器、
+// 停定时任务与 MCP 子进程；幂等防重入
 let shuttingDown = false
 app.on('before-quit', (event) => {
   if (shuttingDown) {
@@ -109,17 +104,13 @@ app.on('before-quit', (event) => {
   }
   shuttingDown = true
   event.preventDefault()
-  log.info('[app] 退出中：收定时任务/日程/通知 → 停网关')
+  log.info('[app] 退出中：收定时任务/日程/通知')
   shutdownCron() // 阶段 9：停 tick + 中止执行中的运行（running → interrupted）
   shutdownNotifyLoop()
   shutdownChat()
   shutdownMcp() // 阶段 8：树杀 MCP 子进程（防孤儿；幂等）
-  shutdownSidecar()
-    .catch((err) => log.warn('[app] 网关回收异常（不阻塞退出）：', String(err)))
-    .finally(() => {
-      log.info('[app] 退出完成')
-      app.exit()
-    })
+  log.info('[app] 退出完成')
+  app.exit()
 })
 
 app.on('window-all-closed', () => {

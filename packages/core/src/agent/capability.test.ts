@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { LlmAuthError, LlmError, SessionExpiredError } from '../llm/errors';
+import { LlmAuthError, LlmError } from '../llm/errors';
 import type {
   ChatCallOptions,
   ChatMessage,
@@ -106,15 +106,6 @@ describe('probeToolsSupport', () => {
 
     expect(probe.support).toBe('unknown');
     expect(probe.detail).toContain('Service Unavailable');
-    expect(chatOnce).toHaveBeenCalledTimes(1);
-  });
-
-  it('SessionExpiredError 原样 rethrow（不吞通道级错误）', async () => {
-    const chatOnce = vi.fn().mockRejectedValue(new SessionExpiredError());
-
-    await expect(probeToolsSupport(fakeClient(chatOnce))).rejects.toBeInstanceOf(
-      SessionExpiredError
-    );
     expect(chatOnce).toHaveBeenCalledTimes(1);
   });
 

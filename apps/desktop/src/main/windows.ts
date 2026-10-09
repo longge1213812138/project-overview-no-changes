@@ -4,12 +4,11 @@
  * - createMainWindow：阶段 2 index.ts 的主窗口逻辑搬过来（外链 handler、did-finish-load 补发状态保留）；
  * - createFloatWindow：无边框 380×560、alwaysOnTop、skipTaskbar，**启动时预建隐藏**（风险表："show 即出"）；
  *   Esc / 失焦收起；toggleFloat 由 Alt+Space 热键与托盘菜单共用。
- * - broadcast：事件统一发给所有窗口（聊天 delta/done/busy、sessionChanged、gateway:state）。
+ * - broadcast：事件统一发给所有窗口（聊天 delta/done/busy、sessionChanged 等）。
  */
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { APP_NAME, FAIRY_VERSION } from '@fairy/core'
-import { getGatewayState } from './sidecar'
 
 let mainWin: BrowserWindow | null = null
 let floatWin: BrowserWindow | null = null
@@ -114,20 +113,13 @@ export function hideFloat(): void {
   }
 }
 
-/** 向所有存活窗口广播事件（聊天 / 会话 / 网关状态统一走这里，双窗口同步） */
+/** 向所有存活窗口广播事件（聊天 / 会话等统一走这里，双窗口同步） */
 export function broadcast(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       win.webContents.send(channel, payload)
     }
   }
-}
-
-/** webContents 'did-finish-load' 后补发一次当前网关状态（窗口加载晚于状态变化时的兜底，双窗口统一在此挂） */
-export function sendStateOnFinishLoad(contents: Electron.WebContents): void {
-  contents.on('did-finish-load', () => {
-    contents.send('gateway:state', getGatewayState())
-  })
 }
 
 /** 幂等：主窗口存活时直接返回 */
@@ -159,9 +151,6 @@ export async function createMainWindow(): Promise<void> {
     shell.openExternal(url)
     return { action: 'deny' }
   })
-
-  // 窗口加载完成晚于状态变化时补发一次网关状态
-  sendStateOnFinishLoad(win.webContents)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {
@@ -214,9 +203,6 @@ export async function createFloatWindow(): Promise<void> {
     if (approvalGate !== null && approvalGate()) return
     hideFloat()
   })
-
-  // 网关状态补发（did-finish-load 时）
-  sendStateOnFinishLoad(win.webContents)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) {

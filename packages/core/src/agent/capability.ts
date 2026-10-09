@@ -1,8 +1,8 @@
 /**
  * 阶段 7：tools 工具调用能力探测（DEV_PLAN §6 阶段 7 任务 1）。
  *
- * Fairy 有两条 LLM 通道：api（OpenAI 兼容直连）与 web（本地网关）；阶段 7 决定
- * tools 工具调用只走 api 通道。本模块给出 probeToolsSupport：向 LlmClient 发一次
+ * Fairy 的 LLM 通道为 api（OpenAI 兼容直连），tools 工具调用仅在该通道启用。
+ * 本模块给出 probeToolsSupport：向 LlmClient 发一次
  * 非流式小调用（占位工具 capability_probe + tool_choice），判定端点是否支持
  * OpenAI function calling，供调用方在不支持的通道上给出明确能力提示，
  * 而不是做成功形状的静默降级。
@@ -12,11 +12,10 @@
  *   （400 不含 tool、5xx 重试耗尽、网络超时等），调用方应按 unknown 继续尝试
  *   带 tools 发送，由后续真实请求兜底。
  * - 不重试：探测只尝试 required → auto 各一次，失败即 unknown。
- * - 通道级错误（SessionExpiredError / LlmAuthError）原样 rethrow，
- *   由调用方既有流水处理，不得吞掉。
+ * - 鉴权错误（LlmAuthError）原样 rethrow，由调用方既有流水处理，不得吞掉。
  * 纯 TS、web-safe（不含 node 内建）；全部非流式。
  */
-import { LlmAuthError, LlmError, SessionExpiredError } from '../llm/errors';
+import { LlmAuthError, LlmError } from '../llm/errors';
 import type {
   ChatCallOptions,
   ChatMessage,
@@ -69,9 +68,9 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 通道级错误不吞：会话过期/鉴权失败必须冒泡给调用方既有流水 */
+/** 通道级错误不吞：鉴权失败必须冒泡给调用方既有流水 */
 function isChannelError(error: unknown): boolean {
-  return error instanceof SessionExpiredError || error instanceof LlmAuthError;
+  return error instanceof LlmAuthError;
 }
 
 function isToolUnsupported(error: LlmError): boolean {
@@ -83,7 +82,7 @@ function isToolUnsupported(error: LlmError): boolean {
  *
  * 尝试 1 用 tool_choice=required 强制模型必须出工具调用；若端点只拒绝
  * tool_choice 参数（400 且 message 含 tool_choice）则降级尝试 2（tool_choice=auto）。
- * 非流式、不重试；SessionExpiredError / LlmAuthError 原样 rethrow。
+ * 非流式、不重试；LlmAuthError 原样 rethrow。
  */
 export async function probeToolsSupport(
   client: LlmClient,

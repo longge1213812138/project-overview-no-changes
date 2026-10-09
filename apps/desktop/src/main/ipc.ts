@@ -2,10 +2,9 @@
  * renderer ⇄ main 的 IPC 边界（DEV_PLAN §6 阶段 2 + 阶段 3）。
  *
  * handlers：
- * - 阶段 2：gateway:getState / gateway:configure / app:openExternal
- * - 通道选择（DEV_PLAN §5.6，通道名一律用 @fairy/core 的 IPC.channel* 常量）：
- *   channel:get / channel:saveApi / channel:select / channel:start / channel:stop / channel:test
- *   （channel:test 替代旧 gateway:testChat，按当前通道探活）
+ * - 阶段 2：app:openExternal
+ * - 接入配置（DEV_PLAN §5.6，通道名一律用 @fairy/core 的 IPC.channel* 常量）：
+ *   channel:get / channel:saveApi / channel:test
  * - 阶段 3：会话 CRUD 与聊天（通道名一律用 @fairy/core 的 IPC 常量，勿手写字符串）：
  *   session:list / session:create / session:remove / chat:history / chat:send / chat:stop
  * - 阶段 4：记忆面板：memory:list / memory:add / memory:update / memory:remove /
@@ -17,20 +16,13 @@
  * - 阶段 7：agent:approvalRespond —— 提交工具审批决定（校验后交 agent-approval 结算）
  * - 阶段 9：cron:list/runs/create/update/setEnabled/remove/trigger（cron.ts 执行与广播）
  * 事件广播：
- * - 网关状态：sidecar onState → broadcast('gateway:state')，300ms 去抖合并（'gateway:state' 为阶段 2 遗留通道名，不在 IPC 常量表，保持兼容）
  * - 聊天事件（delta/done/busy）与会话变化（session:changed）由 chat.ts 直接走 windows.broadcast
- * 托盘：login_failed → 红图标 + 异常 tooltip（tray 实例由 index.ts 创建后经 registerTray 注入）。
  */
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron'
-import type { Tray } from 'electron'
-import { join } from 'node:path'
-import { IPC, APP_NAME, FAIRY_VERSION } from '@fairy/core'
+import { BrowserWindow, ipcMain, shell } from 'electron'
+import { IPC } from '@fairy/core'
 import type {
   ApiChannelConfig,
-  ChannelKind,
   EventListFilter,
-  GatewayAccountConfig,
-  GatewayState,
   MemoryKind,
   MemoryListFilter,
   ScheduleScope,
@@ -52,15 +44,7 @@ import { getFloatWindow, getMainWindow } from './windows'
 import { log } from './logger'
 import { getEventStore } from './events'
 import { broadcast } from './windows'
-import { configureGateway, getGatewayState, onGatewayStateChanged } from './sidecar'
-import {
-  channelTest,
-  getChannelState,
-  saveApi,
-  selectChannel,
-  startGatewayAction,
-  stopGatewayAction
-} from './channel'
+import { channelTest, getChannelState, saveApi } from './channel'
 import { isAutoStartEnabled, setAutoStart } from './autostart'
 import { exportDiagnostics, openLogsDir } from './diagnostics'
 import { listSkills, rescanSkills, setSkillEnabled } from './skills'
@@ -80,11 +64,6 @@ import {
   triggerCronTask,
   updateCronTask
 } from './cron'
-
-let tray: Tray | null = null
-let normalIcon: Electron.NativeImage | null = null
-let redIcon: Electron.NativeImage | null = null
-let iconsResolved = false
 
 // ===== 阶段 4：记忆入参校验（IPC 边界不信任 renderer，坏输入 throw → invoke reject） =====
 
@@ -197,48 +176,10 @@ function parseEventFilter(filter: unknown): EventListFilter | undefined {
   }
 }
 
-function iconsDir(): string {
-  // 开发态：项目 resources/；打包后：extraResources（与 windows.ts iconPath() 规则一致）
-  return app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources')
-}
-
-function ensureIcons(): void {
-  if (iconsResolved) return
-  iconsResolved = true
-  normalIcon = nativeImage.createFromPath(join(iconsDir(), 'icon.png'))
-  redIcon = nativeImage.createFromPath(join(iconsDir(), 'icon-red.png'))
-}
-
-/** tray 实例由 index.ts 创建后注入；保持 index.ts 简洁 */
-export function registerTray(t: Tray): void {
-  tray = t
-  ensureIcons()
-}
-
-/** login_failed（含 getGatewayState 派生的会话过期）→ 托盘红 + 异常 tooltip；否则恢复 */
-export function setTrayState(state: GatewayState): void {
-  if (!tray) return
-  ensureIcons()
-  if (state.accountStatus === 'login_failed') {
-    tray.setImage(redIcon?.isEmpty() ? nativeImage.createEmpty() : (redIcon ?? nativeImage.createEmpty()))
-    tray.setToolTip(`🧚 ${APP_NAME} · 会话异常（点击打开设置）`)
-  } else {
-    tray.setImage(normalIcon?.isEmpty() ? nativeImage.createEmpty() : (normalIcon ?? nativeImage.createEmpty()))
-    tray.setToolTip(`${APP_NAME} v${FAIRY_VERSION}`)
-  }
-}
-
 export function registerIpcHandlers(): void {
-  // ===== 阶段 2：网关 / 外链 =====
-  ipcMain.handle('gateway:getState', () => getGatewayState())
-  ipcMain.handle('gateway:configure', (_event, input: GatewayAccountConfig) => configureGateway(input))
-
-  // ===== 通道选择（DEV_PLAN §5.6；启动不自动登录，网页网关需显式 channel:start） =====
+  // ===== 接入配置 / 外链（DEV_PLAN §5.6） =====
   ipcMain.handle(IPC.channelGet, () => getChannelState())
   ipcMain.handle(IPC.channelSaveApi, (_event, cfg: ApiChannelConfig) => saveApi(cfg))
-  ipcMain.handle(IPC.channelSelect, (_event, channel: ChannelKind) => selectChannel(channel))
-  ipcMain.handle(IPC.channelStart, () => startGatewayAction())
-  ipcMain.handle(IPC.channelStop, () => stopGatewayAction())
   ipcMain.handle(IPC.channelTest, (_event, message: string) => channelTest(message))
 
   // ===== 阶段 10：联网检索（DEV_PLAN §5.10；仅 API 通道；保存后同步重装联网工具） =====
@@ -423,21 +364,5 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.cronTrigger, (_event, id: unknown) => {
     if (typeof id !== 'string' || id === '') throw new Error('任务 id 必须为非空字符串')
     return triggerCronTask(id)
-  })
-
-  // 网关状态广播：sidecar onState → 全窗口 send；300ms 去抖合并高频变化
-  let pending: GatewayState | null = null
-  let timer: NodeJS.Timeout | null = null
-  onGatewayStateChanged((state) => {
-    pending = state
-    setTrayState(state) // 托盘立即更新，不等去抖
-    if (timer) return
-    timer = setTimeout(() => {
-      timer = null
-      if (!pending) return
-      const snapshot = pending
-      pending = null
-      broadcast('gateway:state', snapshot)
-    }, 300)
   })
 }

@@ -1,10 +1,12 @@
 /**
- * @fairy/core — 渲染层专用入口（web-safe：不含 gateway/ 等 node 内建依赖模块）。
+ * @fairy/core — 渲染层专用入口（web-safe：不含 node 内建依赖模块）。
  * electron.vite.config.ts 的 renderer alias 指向这里；类型仍从完整入口解析（tsc 走 package main）。
  * agent/ is web-safe and only contains the transport/runtime contract, not OS executors.
+ * client/ 是渲染层访问 main 的唯一通道（ADR-0001）。
  */
 
 export * from './constants';
 export * from './ipc';
+export * from './client';
 export * from './llm';
 export * from './agent';

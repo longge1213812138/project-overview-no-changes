@@ -12,7 +12,7 @@ import { DEFAULT_WEB_ACCESS_CONFIG } from '@fairy/core'
 import type { FairyConfig } from './config'
 import { getWebConfig, isWebEnabled, runWebRetrieval, saveWebConfig, testWebSearch } from './web'
 
-const cfgState: { current: FairyConfig } = { current: { apiKey: 'sk-test' } }
+const cfgState: { current: FairyConfig } = { current: {} }
 
 vi.mock('./logger', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -50,7 +50,7 @@ function stubFetch(impl: (url: string) => Response): { restore: () => void } {
 }
 
 afterEach(() => {
-  cfgState.current = { apiKey: 'sk-test' }
+  cfgState.current = {}
   vi.restoreAllMocks()
 })
 

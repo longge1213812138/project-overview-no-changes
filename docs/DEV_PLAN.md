@@ -1,9 +1,10 @@
 # Fairy — Windows 私人助手开发总纲
 
 > 项目代号：Fairy
-> 目标：Windows 桌面私人助手；MVP 支持 **DeepSeek 网页版**（chat.deepseek.com 会话）与 OpenAI 兼容 API，扩展路线图见阶段 7–11。
+> 目标：Windows 桌面私人助手；MVP 支持 OpenAI 兼容 API（官方 DeepSeek API / 任意兼容端点），扩展路线图见阶段 7–11。
 > 参考蓝本：[zhu1090093659/deepseek-pp](https://github.com/zhu1090093659/deepseek-pp)（已归档，源码在 `reference/deepseek-pp/`，仅借鉴设计）。
 > 文档版本：v0.3（MVP 完成后的扩展路线图）
+> **变更（2026-10-10）**：DeepSeek 网页通道（`ds-free-api` 网关 sidecar + 账号登录引导流）已**彻底移除**，唯一接入方式为 OpenAI 兼容 API；本文相关章节（§5.5、§5.6、阶段 1/2/6、附录等）已就地更新，历史实施记录保留原貌并加注。
 
 ---
 
@@ -27,13 +28,13 @@
 
 | # | 功能 | 说明 |
 |---|---|---|
-| F1 | 简单问答 | 与 DeepSeek 网页版对话，流式输出；**不做**工具调用/Agent |
+| F1 | 简单问答 | 与 OpenAI 兼容端点对话，流式输出；**不做**工具调用/Agent |
 | F2 | 会话系统 | 多会话、切换/新建/删除、历史本地持久化、上下文裁剪 |
 | F3 | 帮我记东西 | 自然语言"记一下 XXX"→ 意图识别 → 存入本地 `memories` 表；随时查（"我之前让你记过什么"） |
 | F4 | 日程管理 | 自然语言增/查/改/完成/取消日程；到点托盘通知；日程面板可视管理 |
 | F5 | 长期记忆 | FTS5 自动沉淀（关键信息抽取入库）+ 对话时按相关性自动注入 |
 | F6 | 桌面形态 | 托盘、`Alt+Space` 浮窗、开机自启 |
-| F7 | 登录引导流 | 首次启动 / 会话过期时引导登录 DeepSeek 网页版并接管会话 |
+| F7 | ~~登录引导流~~ | **已移除（2026-10-10）**：原为引导登录 DeepSeek 网页版并接管会话；现改为设置页填写 OpenAI 兼容 API 配置（见 §5.6） |
 
 ### 1.2 MVP 范围外
 
@@ -79,10 +80,7 @@
 │        │ OpenAI 兼容 /v1/chat/completions                    │
 └────────┼───────────────────────────────────────────────────┘
          ▼
-  LLM 网关 sidecar（阶段 1：ds-free-api / deeperseeker，外部进程）
-         │  网页会话 = 账号池凭据（网关自动登录，PoW 等由网关内部处理）
-         ▼
-  chat.deepseek.com（免费网页额度）/ OpenAI 兼容 API
+  OpenAI 兼容端点（官方 DeepSeek API / 任意兼容供应商）
 ```
 
 上图表达 MVP 架构及本地后续能力方向；当前实际能力与组件以现有代码和 M0–M4 验收记录为准。
@@ -94,7 +92,7 @@ cron 调用受控 Agent 运行时。产品范围保持本地单用户，不包�
 
 1. **MVP 与 Agent 分层演进**：M0–M4 当前只依赖流式聊天和意图解析；后续 Agent 层统一适配模型工具调用格式，LLM 输出的工具调用仍须经本地工具注册表和权限策略。
 2. **"记东西 / 日程"走意图解析，不走工具调用**：每条用户消息先做一次**非流式小请求**做意图分类 + 参数抽取（模型返回严格 JSON），命中就写本地 SQLite，再回复；否则直接流式问答。详见 §5.1。
-3. **LLM 通道可替换**：assistant-core 只认 OpenAI 兼容 base_url。网页会话（默认，免费）失效时可填官方 API Key 兜底（设置页一个输入框）。
+3. **LLM 端点可替换**：assistant-core 只认 OpenAI 兼容 base_url。官方 DeepSeek API 与任意兼容端点（含自建/代理）都只是换一个 baseUrl + Key（设置页三个输入框）。
 
 后续 Agent 不直接取代已验证的记忆/日程意图路径；是否迁移某项能力，需在相应阶段用兼容性与安全验收决定。
 
@@ -106,7 +104,7 @@ cron 调用受控 Agent 运行时。产品范围保持本地单用户，不包�
 |---|---|---|
 | 桌面壳 | **Electron 39 + React 19 + Vite + TypeScript** | 当前项目版本；托盘/全局热键/系统通知生态成熟 |
 | 核心逻辑 | **Node ≥24.15，纯 TS 包 `packages/core`（不依赖 Electron）** | 全部可 vitest 单测；SQLite 用 better-sqlite3 同步 API |
-| LLM 网关 | **ds-free-api（Rust 单文件）作为 sidecar**，备选 deeperseeker（Python） | 单二进制零依赖；Fairy main 进程 `spawn` 管理生命周期 |
+| LLM 接入 | **OpenAI 兼容 HTTP API**（内建 `fetch`，无新增依赖） | 一个 baseUrl + Key 即可接官方 DeepSeek API 或任意兼容端点；无外部进程、无 sidecar 生命周期 |
 | 数据库 | **better-sqlite3**（WAL + FTS5） | 单文件零运维，记忆检索用 FTS5 关键词 + 权重，不引入 embedding |
 | 热键/托盘/通知 | Electron 内置 `globalShortcut` / `Tray` / `Notification` | 无额外依赖 |
 | 开机自启 | `app.setLoginItemSettings(true)` | 系统级 |
@@ -127,7 +125,6 @@ fairy/
 │       │   ├── tray.ts          # 托盘 + 菜单
 │       │   ├── hotkeys.ts       # Alt+Space 浮窗
 │       │   ├── windows.ts       # 浮窗 / 主窗口管理（alwaysOnTop、失焦收起）
-│       │   ├── sidecar.ts       # 启停 LLM 网关子进程（随机端口、退出回收）
 │       │   ├── notify-loop.ts   # 日程提醒 30s 轮询 → Notification
 │       │   └── ipc.ts           # renderer ⇄ main 的 IPC 边界
 │       ├── src/preload/
@@ -135,11 +132,11 @@ fairy/
 │           ├── chat/            # 聊天面板（流式 Markdown；Agent 状态/审批按后续阶段加入）
 │           ├── calendar/        # 日程面板
 │           ├── memory/          # 记忆面板
-│           └── settings/       # 设置：登录引导、通道切换、热键、自启
+│           └── settings/       # 设置：API 接入配置、联网检索、Skill/MCP、热键、自启
 ├── packages/
 │   └── core/
 │       ├── src/
-│       │   ├── llm/            # OpenAI 兼容客户端（流式/中断/重试/会话过期检测）
+│       │   ├── llm/            # OpenAI 兼容客户端（流式/中断/重试/错误分类）
 │       │   ├── intent/         # 意图解析（prompt + JSON 解析 + 校验）
 │       │   ├── memory/         # 记忆抽取、FTS5 检索、注入组装
 │       │   ├── calendar/       # 日程增删改查 + 自然语言→绝对时间
@@ -224,34 +221,38 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 - `sessions` / `messages` 表；浮窗默认使用"快速会话"（固定 session），主窗口可管理全部会话。
 - 裁剪策略：system + 最近 N 条消息；总预算约 6000 token（按 1 token ≈ 1.5 字符估算），超预算从最旧开始丢弃（保留 system 与用户明确要保留的内容）。MVP 不做摘要式压缩。
 
-### 5.5 登录引导流（F7）
+### 5.5 ~~登录引导流（F7）~~ → 已移除
 
-1. **触发**：首次启动、或 LLM 客户端命中会话过期指纹（持续 429 `overloaded`，见 `docs/llm-bridge-notes.md` §4）、或网关日志登录失败扫描（`RISK_DEVICE_DETECTED` / `USER_IS_BANNED` / `user is muted`）→ 托盘红色 + 设置页弹引导卡。
-2. **步骤**（设置页内图文引导，每步一个按钮；账号池版，不再收 cookie）：
-   - a. `shell.openExternal('https://chat.deepseek.com')` 用系统浏览器打开页面（取设备指纹用，**无需登录**）；
-   - b. F12 → Console 执行 `copy(SMSdk.getDeviceId())` 复制设备指纹（设备级，同机器多账号可复用，一次获取长期有效，见 `llm-bridge-notes` §1）；
-   - c. 填写账号（邮箱/手机号）/密码/device_id → 写配置 → 重启 sidecar → `GET /health` 探活 + 测试对话 → 完成。
-3. **配置存放**：凭据现存于 `%APPDATA%/fairy/secrets.dpapi.json`，通过 Electron `safeStorage`（Windows DPAPI）保护；`config.json` 只保存非敏感配置。早期 MVP 的明文配置由阶段 6 迁移逻辑兼容处理。
+**（2026-10-10 移除）** 原设计：首次启动/会话过期时引导登录 DeepSeek 网页版（`chat.deepseek.com`），
+含设备指纹获取（`SMSdk.getDeviceId()`）、账号池凭据（邮箱/手机号 + 密码 + device_id）、
+`ds-free-api` 网关 sidecar 启停与登录态日志扫描、托盘红色告警、以及会话过期指纹（持续 429 `overloaded`）。
+相关代码（`core/gateway/*`、`main/sidecar.ts`、托盘红图标、`SessionExpiredError`）、
+配置字段（`gatewayBin` / 网关 `apiKey` / `account`）、打包分发（`scripts/stage-extras.mjs` +
+`extraResources/ds-free-api`）与凭据项已一并删除；残留的旧配置由 `loadConfig` 一次性清出。
 
-### 5.6 通道选择（OpenAI 兼容 API / DeepSeek 网页）
+**替代路径**：设置页直接填写 OpenAI 兼容 API 配置（§5.6），不再有任何形式的网页登录。
 
-1. **启动不自动登录（硬规则）**：应用启动不 spawn 网关、不发生任何 DeepSeek 网页登录；是否联网、走哪条通道由用户在设置页显式决定。
-2. **通道持久化**：`config.json` 增加 `channel: 'api' | 'web' | null` 与 `api: { baseUrl, apiKey, model, apiStyle }`。
+### 5.6 接入配置（OpenAI 兼容 API）
+
+1. **唯一接入方式**：OpenAI 兼容 API。应用启动**不发起任何第三方登录**、不 spawn 任何外部进程；
+   是否调用远端、什么时候调用，完全由用户发消息决定。
+2. **持久化**：`config.json` 的 `channel: 'api' | null`（null = 尚未配置）与 `api: { baseUrl, model, style }`；
+   API Key 走 DPAPI 密件（`secrets.dpapi.json`），明文与诊断报告都不含 Key。
    - **接口风格 `apiStyle: 'chat' | 'responses'`（2026-10-05 用户要求）**：`chat`（默认）走 Chat Completions（`POST …/v1/chat/completions`）；`responses` 走 Responses API（`POST …/v1/responses`）。端点归一：完整方法路径按风格**换/保后缀**不二次拼接、`…/v1` 版本段直接接方法名、根地址补 `/v1/<方法>`；协议差异（`input` 项数组 / 扁平 tools / `max_output_tokens` / 事件流 `type` 帧）全部收敛在 `core/llm/responses.ts`，重试、超时、错误分类、SSE 行读取与 chat 风格共用（`client.ts` 抽出 `consumeSse`）；工具调用、能力探测、意图解析、cron 均自动跟随该风格，探测缓存键含风格不串扰。配置存 `config.json api.apiStyle`（老配置缺省归一为 chat）。
-   - `channel = null`（首启/本节上线后升级）→ 设置页展示双通道选择卡：
-   - **OpenAI 兼容 API**：baseUrl（默认 `https://api.deepseek.com/v1`）+ API Key + model（默认 `deepseek-chat`）→ 保存即启用；聊天/意图/抽取全部直连该端点，不启动网关（可接官方 DeepSeek API 或任意 OpenAI 兼容端点）。
-   - **DeepSeek 网页**：走 §5.5 账号引导流；选中后需点击「启动网关」才 spawn+登录，**每次启动 Fairy 均需手动点一次**（启动后会话期间保持运行）。
-3. **切换规则**：切到 api 会自动停止运行中的网页网关（避免后台登录）；切回 web 不自动启动；已在运行时保存账号 → 网关热重启应用新配置。
-4. **测试对话按当前通道执行**；会话过期指纹（§5.5 / llm-bridge-notes §4，持续 429 overloaded）仅对网页通道生效，API 通道的 429 走常规退避。
+   - `channel = null`（首启）→ 设置页顶部提示「尚未配置接入方式」+ 表单常显（baseUrl 默认 `https://api.deepseek.com/v1`、model 默认 `deepseek-chat`）。
+3. **保存即启用**：`channel:saveApi` 校验 baseUrl（可解析 + http/https）、model 非空，Key 留空则保持已存
+   （首次必填）；聊天、意图解析、记忆抽取、Agent 工具、cron、联网检索全部直连该端点。
+4. **测试对话**：`channel:test` 按当前配置发一条非流式消息探活；`401 invalid_api_token` → 明确提示 Key 无效。
+   **429 一律走常规指数退避重试**（原文的「持续 429 overloaded = 网页会话过期」指纹随网页通道一并移除）。
 
 ### 5.7 Agent 与工具循环（后续阶段）
 
-- **通道范围（2026-10-03 用户决定）**：工具调用仅走 **API 通道**并以其为验收通道；web 通道不做 tools 适配与测试（保留原有聊天功能）。会话已注册工具而激活通道为 web 时，必须向用户给出明确的「当前通道不支持工具调用」能力提示，不得静默降级为无工具聊天。
+- **端点能力降级口径**：工具调用是所有会话的默认行为；端点不支持时（能力探测 `unsupported`）必须向用户给出明确的「当前端点不支持工具调用」能力提示，不得静默降级为无工具聊天（原「web 通道不做 tools 适配」的限制随网页通道移除）。
 - 对话运行时可消费模型返回的工具调用，按「校验 → 权限判定/用户审批 → 执行 → 结果回传模型」循环；每轮、总轮数、耗时、输出大小与并发均须有上限，且可取消、可观测、可测试。
 - 工具由 main/core 侧注册表持有强类型 schema、风险级别、权限需求和执行器。renderer 只展示状态与审批 UI，不直接执行工具；LLM 输出视为不可信输入。
 - 工具错误应明确回传并保留失败状态；超时、取消、模型异常和进程退出不能伪装成成功。
 - 本地 Shell 默认受限于当前工作区。实现前需验证 Windows 可用的 OS 级隔离方案，覆盖路径逃逸、符号链接/重解析点、子进程与环境继承；目录作为 cwd 不足以构成安全边界。确需越界时先确认，无法可靠隔离/确认的操作拒绝执行。
-- 模型/网页内容可能包含 prompt injection。工具权限由代码策略而非模型文字授予；高影响或不可逆操作需单独审批。
+- 模型输出/检索到的页面内容可能包含 prompt injection。工具权限由代码策略而非模型文字授予；高影响或不可逆操作需单独审批。
 
 ### 5.8 Skill 与 MCP（后续阶段）
 
@@ -265,7 +266,7 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 - 任务定义与运行记录持久化，计划处理时区/DST、错过触发、重启恢复、重复防护、并发、失败重试与取消。
 - 定时执行复用 Agent 和工具权限策略；只允许事先授权的操作。需要交互确认的动作不能在无人值守时自动放宽权限，须暂停任务并通知用户。
 
-### 5.10 联网检索（阶段 10，API 通道）
+### 5.10 联网检索（阶段 10）
 
 **目标**：对话过程中按需自动收集外部资料，并把资料以「可追溯」的方式整合进回复——
 资料注入 §5.1 流水里的 systemExtra（与记忆/日程同一形态），交由模型整合作答。
@@ -283,8 +284,7 @@ system: 「从以下对话中抽取值得长期记住的信息：用户偏好、
 排除面（优先级低于上面 #1）：指向对话自身的句子（"刚才我说了什么"）、纯创作类指令
 （"帮我写一封邮件"）、短寒暄。另有两道总闸：
 
-- **开关**：设置页「联网检索」总开关（默认开启；关闭即完全不外发请求）；
-- **通道**：**仅 API 通道**。网页通道不做联网适配（与「工具调用仅 API 通道」同取向），不静默降级。
+- **开关**：设置页「联网检索」总开关（默认开启；关闭即完全不外发请求，并卸载联网工具）。
 
 #### ② 来源范围
 
@@ -337,29 +337,37 @@ UI 侧把同一份编号渲染成气泡下方的来源列表（点击走系统�
 
 ### 阶段 1：LLM 桥接通（0.5-1 天）★先打通
 
-1. 二选一跑起来（**只需支持流式 chat completion，不要求 tools**，门槛大幅降低）：
-   - ds-free-api（Rust 单文件）：账号池（邮箱/手机号 + 密码 + device_id）自动登录，写进配置 `[[ds_core.accounts]]` 段 → `ds-free-api -c config.toml` → 监听 `127.0.0.1:22217`；（v0.2.11 起不再收 cookie，详见 docs/llm-bridge-notes.md §1）；
-   - deeperseeker（Python）：按其 README 注入 cookie → `:8000/v1`。
+> 历史记录（原为「二选一跑起来 ds-free-api / deeperseeker 本地网关」）：网页通道移除后，
+> 阶段 1 的实际形态是**直连 OpenAI 兼容端点**，无本地进程。以下保留原验收口径供回溯。
+
+1. 直连 OpenAI 兼容端点（**只需支持流式 chat completion，不要求 tools**）：
+   `baseUrl`（默认 `https://api.deepseek.com/v1`）+ API Key + model（默认 `deepseek-chat`）。
 2. curl 验证：
 
    ```bash
-   curl -N http://127.0.0.1:22217/v1/chat/completions \
+   curl -N https://api.deepseek.com/v1/chat/completions \
      -H 'Content-Type: application/json' \
-     -d '{"model":"default","stream":true,
+     -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+     -d '{"model":"deepseek-chat","stream":true,
           "messages":[{"role":"user","content":"一句话说说你是谁"}]}'
    ```
 
-3. **记录到 `docs/llm-bridge-notes.md`**：model 取值（default/expert…）、会话过期时的**报错指纹**（HTTP 码 + 响应体特征，供 5.5 的过期检测用）、限速特征。
+3. **记录端点行为**：model 取值、限速与错误响应特征（供错误分类与退避策略使用）。
 
-**验收**：拿到流式回复；过期指纹有书面结论。
+**验收**：拿到流式回复；错误分类（401 鉴权 / 429 退避 / 5xx 重试）有书面结论。
 
-### 阶段 2：sidecar 化 + 登录引导流（1-2 天）
+### 阶段 2：LLM 客户端与接入配置（1-2 天）
 
-1. `main/sidecar.ts`：Fairy 启动时 `spawn` 网关（端口随机、配置含账号凭据（账号/密码/device_id）），退出时 kill 并回收（防 Windows 僵尸进程）；health 轮询（`GET /health`）。
-2. `packages/core/llm`：OpenAI 兼容客户端——流式解析、`AbortController` 停止、4xx 指数退避重试（≤3）、**过期指纹匹配 → 抛 `SessionExpired` 事件**给 main。
-3. 设置页实现 5.5 引导流（填账号/device_id → 写配置 → 重启 sidecar → 探活 → 完成态）。
+> 历史记录（原为「sidecar 化 + 登录引导流」）：
+> `main/sidecar.ts`（spawn/回收 ds-free-api、`GET /health` 探活）、账号池配置与
+> `SessionExpired` 过期指纹、设置页账号引导流，均已随网页通道移除（见 §5.5）。
 
-**验收**：清掉旧进程场景：会话过期/登录失败时托盘变红 + 设置页出引导卡，按引导重新保存账号凭据后可继续对话；验收手段：设置页「测试对话」按钮端到端探活（本阶段替代完整聊天 UI）。
+1. `packages/core/llm`：OpenAI 兼容客户端——流式解析、`AbortController` 停止、4xx 指数退避重试（≤3）、
+   401 `invalid_api_token` → `LlmAuthError`（不重试）、429/5xx → 退避重试耗尽后抛 `LlmError`（带状态码）。
+2. `main/channel.ts`：接入配置读写（`channel:saveApi` / `channel:get` / `channel:test`）+ `resolveActiveChannel()` 供聊天/意图/抽取/cron 共用；API Key 走 DPAPI 密件。
+3. 设置页接入配置表单（baseUrl / API Key / model / 接口风格）+「测试对话」端到端探活。
+
+**验收**：设置页保存配置后「测试对话」拿到回复；Key 无效、baseUrl 非法、超时均有可见错误；重启 Fairy 配置保留。
 
 ### 阶段 3：会话系统 + 聊天 UI（2-3 天）
 
@@ -396,29 +404,29 @@ UI 侧把同一份编号渲染成气泡下方的来源列表（点击走系统�
 ### 阶段 6：打包 + 硬化（1-2 天）
 
 1. NSIS（开机自启选项默认勾选）+ portable 单 EXE；`app.setLoginItemSettings` 生效。
-2. 账号凭据（账号 + 密码 + device_id）存 DPAPI（`@kingsu/windows-dpapi` 或自调 `CryptProtectData`），旧明文自动迁移。
-3. 日志（electron-log，滚动 7 天）+ 一键诊断导出（版本/系统信息，不含账号凭据）。
-4. （可选，以后再说）自建 LLM 网关替换 sidecar：参考 `reference/deepseek-pp/core/deepseek/{pow.ts,request-codec.ts,stream-codec.ts}`——**MVP 不排期**，仅在 sidecar 停更/被禁时启动。
+2. API Key（以及 MCP env）存 DPAPI（`@kingsu/windows-dpapi` 或自调 `CryptProtectData`），旧明文自动迁移。
+3. 日志（electron-log，滚动 7 天）+ 一键诊断导出（版本/系统信息，不含凭据）。
+4. ~~（可选）自建 LLM 网关替换 sidecar~~ —— 随网页通道移除**已取消**（不再需要自建网关，官方 API 即直连端点）。
 
 **实施备注（2026-10-02 已落地）**：
 - ② DPAPI 走 Electron `safeStorage`（win32 下即 `CryptProtectData`）：零原生依赖（本机无 VS Build Tools，且 npm 上并无 `@kingsu/windows-dpapi`）；密件单独存 `secrets.dpapi.json`，`config.json` 只剩非敏感字段；`safeStorage` 不可用时降级明文并在诊断报告如实标注 `secretsProtected:false`。
 - ①「默认勾选」= NSIS 自定义安装选项页（`apps/desktop/resources/installer.nsh`；`/S` 静默安装也按默认开启）；**Run 值名必须是 AUMID `com.fairy.assistant`**（实测 Electron 39：值名不匹配时 `openAtLogin` 恒 false，只有 `executableWillLaunchAtLogin` 为 true），应用侧 `app.setLoginItemSettings` 传同一 `name`。
-- 网关二进制随包分发：`scripts/stage-extras.mjs` 预置 `resources/ds-free-api/`（不入 git；绝不复制 `config.toml`），`extraResources` 带进安装包/免安装包。
+- ~~网关二进制随包分发~~（`scripts/stage-extras.mjs` + `extraResources/ds-free-api`）：**已删除**（2026-10-10），安装包只带应用自身产物与图标。
 
-**验收**：干净虚拟机从安装到完成首次登录 < 10 分钟；开机自启后托盘自动出现且日程提醒不丢失（错过的标"已过期"不补弹）。
+**验收**：干净虚拟机从安装到完成首次 API 配置 < 10 分钟；开机自启后托盘自动出现且日程提醒不丢失（错过的标"已过期"不补弹）。
 
 ### 阶段 7：Agent 工具运行时与本地 Shell
 
-> **通道范围（2026-10-03 用户决定）**：本阶段 tools 适配、能力探测与验收**只走 API 通道**；web 通道不做 tools 适配与测试（保留原有聊天功能，MVP 聊天验收清单不受影响）。激活通道为 web 而会话已注册工具时，必须给出明确能力提示，不做成功形状的静默降级。
+> **范围（原 2026-10-03 决定的「只走 API 通道」随网页通道移除而失效）**：tools 适配、能力探测与验收面向所有会话；端点不支持工具调用时（能力探测 `unsupported`）必须给出明确能力提示，不做成功形状的静默降级。
 
-1. 复核 API 通道对工具调用的支持差异，定义统一的工具调用/结果类型、循环状态、取消和错误语义；不支持工具调用的通道须有明确能力提示，不做成功形状的静默降级。
+1. 复核端点对工具调用的支持差异，定义统一的工具调用/结果类型、循环状态、取消和错误语义；不支持的端点须有明确能力提示，不做成功形状的静默降级。
 2. 实现有界工具循环和工具注册表；工具输入严格 schema 校验，执行结果、安全决策和失败状态可追踪。
 3. 实现审批与权限策略；本地 Shell 默认限制在当前工作区，越界操作先确认。选用并验证真正可用的 Windows 隔离边界；无法证明安全的命令拒绝执行。
 
-**验收**：模拟工具可完整往返多轮；模型伪造参数、循环超限、超时和取消均正确失败/终止；未经授权的工具不会执行；Shell 不能逃逸工作区或启动脱离管控的子进程；越界操作需得到明确确认；renderer 无直接 OS 执行能力。端到端验收在 API 通道完成；web 通道不参与阶段 7 工具调用测试。
+**验收**：模拟工具可完整往返多轮；模型伪造参数、循环超限、超时和取消均正确失败/终止；未经授权的工具不会执行；Shell 不能逃逸工作区或启动脱离管控的子进程；越界操作需得到明确确认；renderer 无直接 OS 执行能力。端到端验收使用真实 API 端点（`e2e.api.test.ts`）。
 
 **实施备注（2026-10-03 已落地）**：
-- **能力探测**：`probeToolsSupport`（`core/agent/capability.ts`）两段探测（`tool_choice:required` → 必要时降级 `auto`），三态 `supported/unsupported/unknown`；同 baseUrl+model 只探一次（`main/agent-tools.ts` 缓存）。`unsupported` → 本轮不带 tools 且 `chatDone.capabilityHint` 明示原因（不静默降级）；`unknown` → 带 tools 尝试，失败即可见错误。实测 `apihub.agnes-3.0-flash = supported（required 一次通过）`。web 通道按范围决定：不探测、不带 tools、恒回传 hint。
+- **能力探测**：`probeToolsSupport`（`core/agent/capability.ts`）两段探测（`tool_choice:required` → 必要时降级 `auto`），三态 `supported/unsupported/unknown`；同 baseUrl+model 只探一次（`main/agent-tools.ts` 缓存）。`unsupported` → 本轮不带 tools 且 `chatDone.capabilityHint` 明示原因（不静默降级）；`unknown` → 带 tools 尝试，失败即可见错误。实测 `apihub.agnes-3.0-flash = supported（required 一次通过）`。探测结论按「端点+模型+接口风格」缓存，端点不支持时本轮不带 tools 并回传 hint。
 - **注册表与授权链**：`ToolRegistry`（schema/risk/approval/source/assess）→ `createRegistryAuthorizer`（未注册/策略 deny/需确认而无审批通道 → 一律默认拒绝；审批 60s 超时 = 拒绝）→ `execute` 拿 `ctx.allowOutside` 二次校验（防御纵深）。内置工具三个：`get_current_time`（read/ask）、`workspace_files`（read，越界 ask）、`shell`（exec，恒 ask）。
 - **Shell 边界（如实声明）**：本机无 VS Build Tools、无法上原生隔离，采用**白名单 + 路径边界 + 进程管控组合，非 OS 级沙箱**：① 正向白名单 9 个只读单进程命令（whoami/hostname/ipconfig/systeminfo/tasklist/findstr/fc/where/tree）+ 危险命令显式拒绝名单先查，命令名禁止含路径；② 参数逐个过 `resolveWorkspacePath`（realpath 解 junction/symlink；UNC/设备路径/盘符相对/`%VAR%` 展开一律拒绝；工作区外 → 越界审批）；③ `spawn` 不经 shell、cwd=工作区、最小 env（SystemRoot/windir/PATH=System32/TEMP/TMP，不泄漏宿主环境）、输出 10 万字符截断、signal/超时杀进程。残余风险：获批越界参数下白名单工具的只读访问（由审批显式覆盖）；cmd/powershell/node 等可派生任意代码的命令永不可放行。
 - **审批 IPC**：`agent:approvalRequest/Settled/Respond` + `agent:toolNotice`；广播全窗口、首响应生效；停止/退出 `cancelAllPending`；浮窗 Esc 豁免（有 pending 时 Esc = 审批拒绝而非收窗）；全部决策 `log.info('[approval]'/'[tool]')` 可追踪。renderer 对话框：默认焦点=拒绝、Esc=拒绝、无「全部允许」、越界红条警告。
@@ -460,13 +468,13 @@ UI 侧把同一份编号渲染成气泡下方的来源列表（点击走系统�
 - **错过与恢复语义**：停机窗口内多次错过 → **只补最近一次**（`latestDue` 合并枚举，带上限防卡死）；任务 `catchup=false` → 记 `missed` 不补跑；启动先收敛 `running→interrupted`（执行中退出可见、不伪装成功/失败），陈旧 pending 按 catchup 执行或记 missed，同任务恢复期已有 pending 不再补 claim（避免同轮双执行）。
 - **并发与重复防护**：claim = `INSERT OR IGNORE` + 唯一键 → 重复触发/竞态一律 duplicate 吞掉；同任务上一轮未结束 → 新触发记 `skipped`（可见）；main 全局**串行执行队列**（一次只跑一个任务），10s tick（unref，不阻止退出）。
 - **无人值守权限（§5.2/§5.9）**：任务只暴露**预授权工具集**（`approval=auto` 的工具也必须在集合内，集合约束不因策略宽松而绕过）；**越界（outside）永不授予**；未预授权/越界 → 拒绝 + 该轮 `denied` + **暂停任务并系统通知**（点击通知切「定时」tab，暂停原因面板可见）——不弹审批、也绝不绕过审批；assess=deny（危险命令等）与交互会话同语义、不升级。
-- **通道门控**：cron 仅 **API 通道**执行（阶段 7 范围决定）；通道不可用/网页通道 → 该轮 failed + 任务立即暂停 + 通知（原因可见）；端点不支持工具按聊天同款 capabilityHint 落运行记录，不静默降级。
+- **接入门控**：cron 执行前先 `resolveActiveChannel()`；配置不可用（未配置/配置不全）→ 该轮 failed + 任务立即暂停 + 通知（原因可见）；端点不支持工具按聊天同款 capabilityHint 落运行记录，不静默降级。
 - **失败策略**：`maxRetries`（0-3）指数退避重试，重试复用同一运行行（attempt+1，不新建幂等键）；重试耗尽计连续失败，达 `failure_limit`（默认 3）→ 自动暂停 + 通知。
 - **入口隔离**：`agent/cron`（schedule/store/policy）只从 `@fairy/core` 完整入口导出，**不进 index.web**；renderer 仅经 `fairy.cron` IPC + `ipc.ts` 类型访问（`entry-isolation.test.ts` 断言 createCronStore/createCronAuthorizer/planTrigger/planRecovery 不在 web 面）。
 - **UI**：主窗口底部新增「定时」tab（CronPanel）：新建/编辑（名称/表达式/时区/预授权工具勾选/错过补跑/重试次数）、暂停/恢复/立即运行/删除、展开运行历史（状态徽章 pending/running/success/failed/denied/missed/skipped/interrupted、耗时、输出、错误、暂停原因）。
 - **测试**：core 新增 **82** 项（schedule 38 含 DST/OR/合并语义、store 27 含幂等 claim/并发/守卫/失败暂停、policy 14 含预授权硬条件/越界升级、迁移 v4 3）+ desktop 新增 **7** 项（驱动：恢复合并补跑/catchup 关记 missed/执行中退出 interrupted/门控暂停通知/幂等 init/IPC 错误路径/广播）；全仓 **374 单测** + typecheck + build 全绿。
 
-### 阶段 10：联网检索（API 通道）
+### 阶段 10：联网检索
 
 1. 在 core 落地 `web/` 面：URL 安全守卫、零依赖 HTML 抽取、检索引擎适配、页面抓取、触发判定、引用编排。
 2. 接入聊天流水线（§5.1 ②c）与工具注册表（`web_search` / `web_fetch`），配联网开关与来源范围。
@@ -478,7 +486,7 @@ UI 侧把同一份编号渲染成气泡下方的来源列表（点击走系统�
 - **触发判定（`core/web/trigger.ts`，纯规则零 LLM 调用）**：三类触发 + 排除面（对话自身/创作类/短寒暄），优先级「显式要求 > 给链接 > 排除面 > 时效信号」；检索词清洗剥离命令词与链接（清洗后为空回退原句）。纯函数便于回归，避免每轮多一次 LLM 调用的延迟与成本。
 - **来源与安全（`core/web/urlguard.ts` + `search.ts`）**：四道筛选（URL 守卫 → 域名白/黑名单 → 去重 → 裁剪）；URL 守卫禁非 http(s)、禁凭据、禁非默认端口、禁内网/本机/链路本地/云元数据（IPv4 私有段 + IPv6 ULA/链路本地/IPv4 映射，规范会把它规范化成 `::ffff:7f00:1` 形，按组解析判回 IPv4）；**残余风险如实声明**：不做 DNS 预解析，DNS rebinding 不在本层防线内。
 - **零依赖解析器（`core/web/html.ts`）**：结果页按 `result__a`/`result__snippet` 锚点抽取；页面正文抽 title + 去脚本/样式/导航/页脚；内联标签（`<b>` 等引擎高亮）strip 不插空格，避免中文词组被撕出空格。
-- **两条整合路径（§5.10 ⑤）**：管线预检索（触发后自动，挂在 `intent==='chat'` 且仅 API 通道）+ 工具循环（`web_search`/`web_fetch`，approval 恒 **ask** / risk **read**，`web_fetch` 的 URL 守卫在 assess 阶段即 deny，不进审批）；保存配置后 `syncWebTools()` 重装/卸载，避免开关关闭后模型仍持有联网能力。
+- **两条整合路径（§5.10 ⑤）**：管线预检索（触发后自动，挂在 `intent==='chat'`）+ 工具循环（`web_search`/`web_fetch`，approval 恒 **ask** / risk **read**，`web_fetch` 的 URL 守卫在 assess 阶段即 deny，不进审批）；保存配置后 `syncWebTools()` 重装/卸载，避免开关关闭后模型仍持有联网能力。
 - **引用与可见性**：注入块含 `[n]` 编号、链接、摘要（+正文摘录）与五条引用规范；`sources` 同时走 `chatDone` 事件与 `message.meta.sources` 两条路确保即时展示与重开会话可见。
 - **配置持久化**：config.json 的 `web` 段（明文无凭据）；`normalizeWebAccessConfig` 统一夹取越界值（maxResults 1-10 / fetchTopN 0-3 / maxPageChars 1000-20000 / timeoutMs 3000-30000），老配置无该段即取默认值。
 - **失败语义**：失败/部分失败/空检索词/开关关闭均有可见原因，且有**总预算**（单次超时 ×(1+N)+3s）兜底，防止「每步刚好卡超时」把一轮生成拖到几分钟；只有用户主动停止才抛 AbortError。
@@ -530,9 +538,9 @@ CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT);
 
 | 风险 | 对策 |
 |---|---|
-| DeepSeek 网页改版导致 sidecar 失效 | LLM 层隔离，官方 API 兜底（设置页填 Key）；关注蓝本/社区；终极手段 = 阶段 6 的可选项（自建网关） |
-| 账号风控/封号 | MVP 保持本地、单用户、低频（消息 ≈ 2 次调用）；全部数据本地化，封号后换通道数据不丢；UI 明示风险 |
-| 账号凭据失效无感知 | 过期指纹（持续 429 `overloaded`）+ 网关日志登录失败扫描（RISK_DEVICE_DETECTED/USER_IS_BANNED/muted）→ 托盘红色 + 引导流一键重配（见 llm-bridge-notes §4） |
+| ~~DeepSeek 网页改版导致 sidecar 失效~~ | **已消除（2026-10-10）**：网页通道与 sidecar 已移除，不再依赖第三方网页实现 |
+| ~~账号风控/封号~~ | **已消除（2026-10-10）**：不再使用网页账号；供应商限流/欠费由 429 退避与错误提示可见 |
+| API Key 失效/欠费无感知 | 401 `invalid_api_token` → `LlmAuthError` 即时提示「API Key 无效」；429/5xx → 指数退避重试耗尽后以可见错误落盘与展示 |
 | 意图误判写脏日程 | JSON 校验 + `remind_at` 合法性 + 确认语可一键撤销（"没有/取消了"再一句即回滚） |
 | 凭据保护不可用或旧配置迁移失败 | Electron `safeStorage` 保护凭据；迁移失败须明确报错，诊断标记保护状态，不得静默丢弃或伪报成功 |
 | Electron 冷启动慢 | 主进程常驻托盘；浮窗窗口启动时预建隐藏（show 即出） |
@@ -550,15 +558,15 @@ CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT);
 
 | 里程碑 | 内容 | 工期 | 累计 |
 |---|---|---|---|
-| M0 | 阶段 0-1：curl 通 DeepSeek 网页会话 | 1-1.5 天 | ~1.5 天 |
-| M1 | 阶段 2-3：sidecar + 登录流 + 会话系统 + 双窗口（**可用聊天助手**） | 3-5 天 | ~1 周 |
+| M0 | 阶段 0-1：curl 打通 LLM 端点（历史：原为 DeepSeek 网页会话） | 1-1.5 天 | ~1.5 天 |
+| M1 | 阶段 2-3：LLM 客户端 + 接入配置 + 会话系统 + 双窗口（**可用聊天助手**）（历史：原为 sidecar + 登录流） | 3-5 天 | ~1 周 |
 | M2 | 阶段 4：记忆（自动沉淀 + 注入 + 面板） | 2-3 天 | ~1.5 周 |
 | M3 | 阶段 5：日程（意图 + 通知 + 面板） | 2-3 天 | ~2 周 |
 | M4 | 阶段 6：打包、自启、DPAPI、日志（**日常可用版**） | 1-2 天 | ~2.5 周 |
-| M5 | 阶段 7：Agent 工具运行时 + 经安全验证的本地 Shell（tools 仅 API 通道） | 待阶段设计评估 | — |
+| M5 | 阶段 7：Agent 工具运行时 + 经安全验证的本地 Shell | 待阶段设计评估 | — |
 | M6 | 阶段 8：Skill + MCP 接入 | 待阶段设计评估 | — |
 | M7 | 阶段 9：持久化 cron 定时引擎 | 待阶段设计评估 | — |
-| M8 | 阶段 10：联网检索（触发/引用/来源策略，仅 API 通道） | 待阶段设计评估 | — |
+| M8 | 阶段 10：联网检索（触发/引用/来源策略） | 待阶段设计评估 | — |
 
 > M0–M4 对应 MVP 里程碑；M5–M8 为本地能力扩展。完成并验收后再打相应 git tag。任意阶段中断，应能回退到上一个已验收的可用状态。
 
@@ -568,7 +576,7 @@ CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT);
 
 1. `reference/deepseek-pp/README.md` 的"核心功能/记忆系统"段——确认交互命名一致；
 2. `reference/deepseek-pp/AGENTS.md` 中 schema migration 与 automation lease 两段——迁移规则适用于各阶段；automation lease 可为阶段 9 的调度并发/恢复设计提供参考，不直接照搬；
-3. `reference/deepseek-pp/core/deepseek/contracts.ts` 与 `request-codec.ts` 路由表（仅当将来做自建网关时精读，当前阶段 1 用现成 sidecar，**可跳过**）。
+3. `reference/deepseek-pp/core/deepseek/contracts.ts` 与 `request-codec.ts` 路由表（仅当将来做自建 LLM 代理时精读；当前直接使用 OpenAI 兼容端点，**可跳过**）。
 
 ---
 
@@ -586,7 +594,7 @@ CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT);
    set ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/
    pnpm package:win
    ```
-   `pnpm package:win` = `stage-extras`（预置网关二进制）→ `electron-vite build` → `electron-builder --win`；
+   `pnpm package:win` = `electron-vite build` → `electron-builder --win`；
    产物：`apps/desktop/release/Fairy Setup <版本>.exe`（NSIS）+ `Fairy-<版本>-portable.exe`（免安装单 EXE）。
 5. `reference/deepseek-pp` 是嵌套 git 仓库（gitlink），仅为本地参考，不参与 Fairy 构建。
 6. 阶段 0 产物：`pnpm dev` 窗口+托盘正常；`release/Fairy Setup 0.0.1.exe`（NSIS，94MB）已验证可生成。

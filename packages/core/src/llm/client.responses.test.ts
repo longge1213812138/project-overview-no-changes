@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createLlmClient } from './index';
-import { LlmError, SessionExpiredError } from './errors';
+import { LlmError } from './errors';
 
 let server: http.Server;
 let port = 0;
@@ -123,12 +123,13 @@ describe('responses 端点与请求体', () => {
     expect(r.finishReason).toBe('tool_calls');
   });
 
-  it('持续 429 overloaded → SessionExpiredError（错误分类与 chat 风格共用）', async () => {
+  it('持续 429 → 常规退避重试后抛 LlmError（错误分类与 chat 风格共用）', async () => {
     handler = (_req, res) =>
       json(res, 429, { error: { message: 'service overloaded', code: 'overloaded' } });
-    await expect(client().chatOnce([{ role: 'user', content: 'x' }])).rejects.toBeInstanceOf(
-      SessionExpiredError
-    );
+    await expect(client().chatOnce([{ role: 'user', content: 'x' }])).rejects.toMatchObject({
+      name: 'LlmError',
+      status: 429
+    });
     expect(requestCount).toBe(4);
   });
 

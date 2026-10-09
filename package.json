@@ -2,7 +2,7 @@
   "name": "fairy",
   "private": true,
   "version": "0.0.1",
-  "description": "Fairy - Windows personal assistant powered by DeepSeek web session",
+  "description": "Fairy - Windows personal assistant powered by OpenAI-compatible LLM APIs",
   "scripts": {
     "dev": "pnpm --filter @fairy/desktop dev",
     "build": "pnpm --filter @fairy/desktop build",

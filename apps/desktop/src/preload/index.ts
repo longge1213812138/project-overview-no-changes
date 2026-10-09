@@ -7,12 +7,10 @@ import type {
   AgentToolNotice,
   ApiChannelConfig,
   ChannelActionResult,
-  ChannelKind,
   ChannelState,
   ChatBusyEvent,
   ChatDeltaEvent,
   ChatDoneEvent,
-  ConfigureResult,
   CronActionResult,
   CronCreateInput,
   CronListResult,
@@ -22,8 +20,6 @@ import type {
   EventListFilter,
   EventRecord,
   FairyApi,
-  GatewayAccountConfig,
-  GatewayState,
   MemoryImportResult,
   MemoryKind,
   MemoryListFilter,
@@ -62,21 +58,11 @@ contextBridge.exposeInMainWorld(
     name: APP_NAME,
     version: FAIRY_VERSION,
 
-    gateway: {
-      getState: (): Promise<GatewayState> => ipcRenderer.invoke('gateway:getState'),
-      configure: (input: GatewayAccountConfig): Promise<ConfigureResult> =>
-        ipcRenderer.invoke('gateway:configure', input)
-    },
-
-    // ===== 通道选择（DEV_PLAN §5.6；test 替代旧 gateway.testChat，按当前通道探活） =====
+    // ===== 接入配置（DEV_PLAN §5.6；目前仅 OpenAI 兼容 API） =====
     channel: {
       get: (): Promise<ChannelState> => ipcRenderer.invoke(IPC.channelGet),
       saveApi: (cfg: ApiChannelConfig): Promise<ChannelActionResult> =>
         ipcRenderer.invoke(IPC.channelSaveApi, cfg),
-      select: (channel: ChannelKind): Promise<ChannelActionResult> =>
-        ipcRenderer.invoke(IPC.channelSelect, channel),
-      startGateway: (): Promise<ChannelActionResult> => ipcRenderer.invoke(IPC.channelStart),
-      stopGateway: (): Promise<ChannelState> => ipcRenderer.invoke(IPC.channelStop),
       test: (message: string): Promise<TestChatResult> => ipcRenderer.invoke(IPC.channelTest, message)
     },
 
@@ -158,10 +144,6 @@ contextBridge.exposeInMainWorld(
       trigger: (id: string): Promise<CronActionResult> => ipcRenderer.invoke(IPC.cronTrigger, id),
       onChanged: (cb: () => void): (() => void) => onEvent<void>(IPC.cronChanged, () => cb())
     },
-
-    // 'gateway:state' 为阶段 2 遗留通道（不在 IPC 常量表，保持兼容）
-    onGatewayState: (cb: (state: GatewayState) => void): (() => void) =>
-      onEvent<GatewayState>('gateway:state', cb),
 
     sessions: {
       list: (): Promise<SessionMeta[]> => ipcRenderer.invoke(IPC.sessionList),

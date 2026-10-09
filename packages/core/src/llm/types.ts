@@ -1,10 +1,9 @@
-/** OpenAI 兼容 LLM 客户端类型（阶段 2，见 docs/llm-bridge-notes.md §3） */
+/** OpenAI 兼容 LLM 客户端类型（阶段 2） */
 
 /**
  * API 接口风格（设置页「接口风格」选择，config.json `api.apiStyle`）：
  * - 'chat'：Chat Completions（POST …/v1/chat/completions，默认）；
  * - 'responses'：Responses API（POST …/v1/responses）。
- * 仅 api 通道有此配置；web 网关通道恒为 'chat'。
  */
 export type ApiStyle = 'chat' | 'responses';
 
@@ -48,10 +47,10 @@ export interface StreamHandlers {
 }
 
 export interface LlmClientOptions {
-  /** 网关地址，如 http://127.0.0.1:22217（尾斜杠会被去掉） */
+  /** OpenAI 兼容 base，如 https://api.deepseek.com/v1（尾斜杠会被去掉） */
   baseUrl: string;
   apiKey: string;
-  /** 默认 'default'（= deepseek-default，见 llm-bridge-notes §3） */
+  /** 模型名；缺省 'default' */
   model?: string;
   /** 接口风格：'chat'（默认，/v1/chat/completions）或 'responses'（/v1/responses） */
   apiStyle?: ApiStyle;

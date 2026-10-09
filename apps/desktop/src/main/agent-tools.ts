@@ -7,8 +7,8 @@
  *   实现注入 core/web 的 searchWeb/fetchWebPage，配置由 web.ts 统一提供）。
  * - getToolRegistry：聊天流水取注册表（registry.list().map(r => r.tool) → runAgent tools）。
  * - syncWebTools：联网配置变更后重新装配（关 → 卸载，开 → 注册），**不静默保留**旧工具。
- * - probeToolsSupportCached：按 capabilityKey（channel.ts 的 api:${baseUrl}|${model} / 'web'）
- *   缓存探测结论，同端点+模型只探测一次；结果含 detail 供 capabilityHint 展示。
+ * - probeToolsSupportCached：按 capabilityKey（channel.ts 的 api:${style}:${baseUrl}|${model}）
+ *   缓存探测结论，同端点+模型+风格只探测一次；结果含 detail 供 capabilityHint 展示。
  *   探测被中止（signal aborted）产生的 unknown 不缓存，下次生成重新探测。
  *
  * 依赖单向：agent-tools → core / logger / web（只读配置），不回 import chat。
@@ -106,8 +106,8 @@ export function syncWebTools(): ToolRegistry {
 const probeCache = new Map<string, CapabilityProbe>()
 
 /**
- * 按 capabilityKey 缓存的 tools 能力探测（同 baseUrl+model 只探测一次）。
- * SessionExpiredError / LlmAuthError 原样冒泡（probeToolsSupport 约定，调用方既有 catch 分类）。
+ * 按 capabilityKey 缓存的 tools 能力探测（同端点+模型+接口风格只探测一次）。
+ * LlmAuthError 原样冒泡（probeToolsSupport 约定，调用方既有 catch 分类）。
  */
 export async function probeToolsSupportCached(
   client: LlmClient,

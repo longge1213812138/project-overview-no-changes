@@ -1,4 +1,4 @@
-import { LlmAuthError, LlmError, SessionExpiredError } from './errors';
+import { LlmAuthError, LlmError } from './errors';
 import {
   buildResponsesBody,
   createResponsesAccumulator,
@@ -18,7 +18,6 @@ import type {
 const RETRY_LIMIT = 3; // 最多重试 3 次（DEV_PLAN §6 阶段 2：4xx 指数退避 ≤3）
 
 type Failure =
-  | { kind: 'expired'; status: 429 }
   | { kind: 'auth'; message: string }
   | { kind: 'retry'; status?: number; message: string }
   | { kind: 'fatal'; status: number; message: string };
@@ -45,7 +44,7 @@ function isAbort(e: unknown, signal?: AbortSignal): boolean {
  * 端点归一（阶段 7 E2E 发现的真实配置形态 + 接口风格扩展）：
  * - 已是完整方法路径（…/chat/completions 或 …/responses）→ 按风格**换/保后缀**，绝不二次拼接；
  * - 以版本段结尾（…/v1、…/v2）→ 直接接方法名（修复 `…/v1` 再拼出 `…/v1/v1/…` 的隐患）；
- * - 根地址（网关 http://127.0.0.1:port 等）→ 补 `/v1/<方法>`。
+ * - 根地址（如 https://api.deepseek.com）→ 补 `/v1/<方法>`。
  * 例：baseUrl `https://api.deepseek.com/v1` + responses → `https://api.deepseek.com/v1/responses`。
  */
 export function resolveEndpoint(baseUrl: string, style: ApiStyle): string {
@@ -136,13 +135,10 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
     return JSON.stringify(body);
   }
 
-  /** 非 2xx / 网络失败 → 失败分类（指纹见 llm-bridge-notes §4） */
+  /** 非 2xx / 网络失败 → 失败分类 */
   function classify(status: number, text: string): Failure {
     if (status === 401 && text.includes('invalid_api_token')) {
       return { kind: 'auth', message: '401 invalid_api_token' };
-    }
-    if (status === 429 && /overloaded/i.test(text)) {
-      return { kind: 'expired', status: 429 };
     }
     if (status === 429 || status >= 500) {
       return { kind: 'retry', status, message: text.slice(0, 300) };
@@ -152,8 +148,6 @@ export function createLlmClient(opts: LlmClientOptions): LlmClient {
 
   function toError(f: Failure): Error {
     switch (f.kind) {
-      case 'expired':
-        return new SessionExpiredError();
       case 'auth':
         return new LlmAuthError(`LLM API Key 无效：${f.message}`);
       case 'fatal':

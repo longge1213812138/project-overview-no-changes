@@ -1,7 +1,7 @@
 /**
  * 一键诊断导出（阶段 6 / DEV_PLAN §6.6.3）。
  *
- * 产出单个 JSON 报告（用户自选保存位置），内容 = 版本 / 系统信息 / 通道与网关状态 /
+ * 产出单个 JSON 报告（用户自选保存位置），内容 = 版本 / 系统信息 / 接入配置 /
  * 存储与日志清单 / 当天日志尾部（脱敏）。
  *
  * **绝不包含凭据**：不读 config.json / secrets.dpapi.json 内容，只报"存在与否"；
@@ -14,7 +14,7 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { FAIRY_VERSION } from '@fairy/core'
 import type { DiagnosticsExportResult } from '@fairy/core'
-import { configFilePath, loadConfig } from './config'
+import { configFilePath } from './config'
 import { getChannelState } from './channel'
 import { logsDir } from './logger'
 import { isSecretsProtected } from './secrets'
@@ -65,7 +65,6 @@ function logTail(): string[] {
 function buildReport(): Record<string, unknown> {
   const channel = getChannelState()
   const userData = app.getPath('userData')
-  const cfg = loadConfig()
   return {
     generatedAt: new Date().toISOString(),
     fairy: {
@@ -93,11 +92,10 @@ function buildReport(): Record<string, unknown> {
     autostart: {
       openAtLogin: app.getLoginItemSettings({ path: process.execPath }).openAtLogin
     },
-    // 通道状态只含 baseUrl/model/网关状态，**不含** apiKey / 账号 / 密码
+    // 接入配置只含 baseUrl/model，**不含** apiKey
     channel: {
       channel: channel.channel,
-      api: channel.api,
-      web: { accountConfigured: channel.web.accountConfigured, gateway: channel.web.gateway }
+      api: channel.api
     },
     storage: {
       configExists: existsSync(configFilePath()),
@@ -106,11 +104,7 @@ function buildReport(): Record<string, unknown> {
       secretsBytes: bytes(join(userData, 'secrets.dpapi.json')),
       secretsProtected: isSecretsProtected(),
       dbExists: existsSync(join(userData, 'fairy.db')),
-      dbBytes: bytes(join(userData, 'fairy.db')),
-      // 网关二进制只报“有没有”，不报完整路径（路径含用户名）
-      gatewayBinConfigured: Boolean(cfg.gatewayBin),
-      gatewayBinExists: Boolean(cfg.gatewayBin && existsSync(cfg.gatewayBin)),
-      gatewayConfigBytes: bytes(join(userData, 'gateway', 'config.toml'))
+      dbBytes: bytes(join(userData, 'fairy.db'))
     },
     logs: logFiles(),
     logTail: logTail()

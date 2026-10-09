@@ -260,12 +260,10 @@ async function executeRun(runId: number): Promise<void> {
   let escalated: CronEscalation | null = null
 
   try {
-    // ===== 通道门控：仅 API 通道（阶段 7 范围决定；不可用/网页 → 暂停 + 通知） =====
+    // ===== 接入门控：配置不可用（未配置/配置不全）→ 暂停 + 通知 =====
     const resolved = resolveActiveChannel()
-    if (!resolved.ok || resolved.channel !== 'api') {
-      const reason = !resolved.ok
-        ? `通道不可用：${resolved.error}`
-        : '定时任务仅支持 OpenAI 兼容 API 通道（当前为 DeepSeek 网页通道）'
+    if (!resolved.ok) {
+      const reason = `通道不可用：${resolved.error}`
       s.pauseTask(task.id, reason)
       s.finishRun(runId, { status: 'failed', error: reason })
       log.warn(`[cron] 通道门控：「${task.name}」已暂停 —— ${reason}`)

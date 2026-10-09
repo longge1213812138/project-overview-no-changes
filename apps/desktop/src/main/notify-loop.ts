@@ -46,7 +46,7 @@ export function initNotifyLoop(): void {
   timer.unref?.() // 不阻止退出（与 extract.ts 定时器同规则）
 }
 
-/** before-quit 最前调（shutdownChat / shutdownSidecar 之前）；同步、尽力而为 */
+/** before-quit 最前调（shutdownChat / shutdownCron 之前）；同步、尽力而为 */
 export function shutdownNotifyLoop(): void {
   if (timer) {
     clearInterval(timer)
