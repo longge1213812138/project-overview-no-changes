@@ -9,7 +9,9 @@ import type {
   GatewayState,
   McpServerListItem,
   SkillListItem,
-  TestChatResult
+  TestChatResult,
+  WebAccessConfig,
+  WebSourceRef
 } from '@fairy/core'
 
 /** 设备指纹取法（docs/llm-bridge-notes.md §1）：Chrome F12 Console 执行后自动复制输出 */
@@ -577,6 +579,9 @@ export default function SettingsTab() {
       {/* ===== E. 应用设置（阶段 6 打包硬化）：开机自启 / 日志 / 诊断导出 ===== */}
       <AppSettingsSection />
 
+      {/* ===== H. 联网检索（阶段 10 / DEV_PLAN §5.10）：开关 / 来源范围 / 用量上限 / 试跑 ===== */}
+      <WebSection />
+
       {/* ===== F. 技能 Skill（阶段 8 / DEV_PLAN §5.8）：列表 + 启用/禁用 + 重扫 ===== */}
       <SkillsSection />
 
@@ -665,6 +670,207 @@ function AppSettingsSection() {
         <button className="btn btn-link" onClick={() => void window.fairy.system.openLogs()} disabled={busy}>
           打开日志目录
         </button>
+      </div>
+      {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
+    </section>
+  )
+}
+
+/**
+ * H. 联网检索（阶段 10 / DEV_PLAN §5.10）。
+ *
+ * 界面口径（与真实的触发/审批口径一一对应，避免「我以为是全自动」的误会）：
+ * - **触发**：默认只在「用户明确要求（联网/搜一下/帮我查…）」「涉及时效信息（最新/今天/新闻/天气…）」
+ *   「直接给了链接」三类情况下联网，普通闲聊不联网；
+ * - **工具**：`web_search` / `web_fetch` 两个工具随开关装配（模型主动调用时**每次都要确认**）；
+ * - **可见**：每次检索都会在回答气泡下方列出实际用到的来源；关闭开关即卸载工具且不再外发请求。
+ */
+function WebSection() {
+  const [cfg, setCfg] = useState<WebAccessConfig | null>(null)
+  const [maxResults, setMaxResults] = useState('5')
+  const [fetchTopN, setFetchTopN] = useState('2')
+  const [allowedText, setAllowedText] = useState('')
+  const [blockedText, setBlockedText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<Feedback | null>(null)
+
+  const [testQuery, setTestQuery] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [items, setItems] = useState<WebSourceRef[] | null>(null)
+
+  useEffect(() => {
+    void window.fairy.web
+      .get()
+      .then((next: WebAccessConfig) => {
+        setCfg(next)
+        setMaxResults(String(next.maxResults))
+        setFetchTopN(String(next.fetchTopN))
+        setAllowedText(next.allowedDomains.join('\n'))
+        setBlockedText(next.blockedDomains.join('\n'))
+      })
+      .catch((e: unknown) => setMsg({ kind: 'err', text: `读取联网配置失败：${String(e)}` }))
+  }, [])
+
+  /** 域名文本 → 数组（支持换行/逗号/中文顿号分隔；空结构 = 不限制） */
+  const parseDomains = (text: string): string[] =>
+    text
+      .split(/[\n,，、;；]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s !== '')
+
+  const readInt = (text: string, fallback: number, min: number, max: number): number => {
+    const n = Number.parseInt(text, 10)
+    if (!Number.isFinite(n)) return fallback
+    return Math.min(max, Math.max(min, n))
+  }
+
+  const handleSave = async (patch: Partial<WebAccessConfig>, okText: string): Promise<void> => {
+    setSaving(true)
+    setMsg(null)
+    try {
+      const res = await window.fairy.web.save(patch)
+      if (res.ok && res.config) {
+        setCfg(res.config)
+        setMaxResults(String(res.config.maxResults))
+        setFetchTopN(String(res.config.fetchTopN))
+        setAllowedText(res.config.allowedDomains.join('\n'))
+        setBlockedText(res.config.blockedDomains.join('\n'))
+        setMsg({ kind: 'ok', text: okText })
+      } else {
+        setMsg({ kind: 'err', text: `保存失败：${res.error ?? '未知错误'}` })
+      }
+    } catch (e) {
+      setMsg({ kind: 'err', text: `保存失败：${String(e)}` })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleToggle = (next: boolean): void => {
+    void handleSave({ enabled: next }, next ? '已开启联网（web_search / web_fetch 已装配）' : '已关闭联网（工具已卸载，不再外发请求）')
+  }
+
+  const handleTest = async (): Promise<void> => {
+    const q = testQuery.trim()
+    if (q === '' || testing) return
+    setTesting(true)
+    setMsg(null)
+    setItems(null)
+    try {
+      const res = await window.fairy.web.search(q)
+      if (res.ok) {
+        setItems(res.items ?? [])
+        setMsg({ kind: 'ok', text: `检索完成：${(res.items ?? []).length} 条来源` })
+      } else {
+        setItems([])
+        setMsg({ kind: 'err', text: `试跑失败：${res.error ?? '未知错误'}` })
+      }
+    } catch (e) {
+      setMsg({ kind: 'err', text: `试跑失败：${String(e)}` })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <section className="web-settings">
+      <h3>联网检索</h3>
+      <p className="section-hint">
+        仅 API 通道可用（网页通道不做联网适配）。触发条件：① 你明确要求（联网/搜一下/帮我查…）；
+        ② 问题涉及最新信息（最新/今天/新闻/天气/股价…）；③ 直接给出了链接。普通闲聊不联网。
+        每次检索都会在回答气泡下方列出实际用到的来源；模型主动调用 web_search / web_fetch 时每次都要你确认。
+        检索词会发送给 DuckDuckGo，关闭开关即完全不外发请求。
+      </p>
+      {cfg === null ? (
+        <p className="section-hint">读取中…</p>
+      ) : (
+        <>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={cfg.enabled}
+              disabled={saving}
+              onChange={(e) => handleToggle(e.target.checked)}
+            />
+            <span>开启联网（{cfg.enabled ? '已开启' : '已关闭'}）</span>
+          </label>
+
+          <div className="web-form">
+            <label className="setting-form">
+              <span>结果条数上限（1-10）</span>
+              <input value={maxResults} onChange={(e) => setMaxResults(e.target.value)} placeholder="5" />
+            </label>
+            <label className="setting-form">
+              <span>自动抓取正文的条数（0-3；0 = 只用摘要）</span>
+              <input value={fetchTopN} onChange={(e) => setFetchTopN(e.target.value)} placeholder="2" />
+            </label>
+            <label className="setting-form">
+              <span>来源白名单（域名，留空 = 不限；如 example.com 含其子域名）</span>
+              <textarea
+                rows={2}
+                value={allowedText}
+                onChange={(e) => setAllowedText(e.target.value)}
+                placeholder={'example.com\ndocs.python.org'}
+              />
+            </label>
+            <label className="setting-form">
+              <span>来源黑名单（命中即丢弃，优先于白名单）</span>
+              <textarea
+                rows={2}
+                value={blockedText}
+                onChange={(e) => setBlockedText(e.target.value)}
+                placeholder={'低质站点.example'}
+              />
+            </label>
+            <div className="app-actions">
+              <button
+                className="btn btn-primary"
+                disabled={saving}
+                onClick={() =>
+                  void handleSave(
+                    {
+                      maxResults: readInt(maxResults, 5, 1, 10),
+                      fetchTopN: readInt(fetchTopN, 2, 0, 3),
+                      allowedDomains: parseDomains(allowedText),
+                      blockedDomains: parseDomains(blockedText)
+                    },
+                    '联网配置已保存'
+                  )
+                }
+              >
+                {saving ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="web-test">
+        <p className="section-hint">试跑一次检索（验证链路与来源过滤，不写入任何会话）。</p>
+        <div className="test-row">
+          <input
+            value={testQuery}
+            onChange={(e) => setTestQuery(e.target.value)}
+            placeholder="如：2026 年主流 LLM 推理框架现状"
+          />
+          <button className="btn" disabled={testing || testQuery.trim() === ''} onClick={() => void handleTest()}>
+            {testing ? '检索中…' : '检索'}
+          </button>
+        </div>
+        {items !== null && items.length > 0 && (
+          <ul className="web-test-list">
+            {items.map((s) => (
+              <li key={`${s.id}-${s.url}`}>
+                <span className="web-source-id">[{s.id}]</span>
+                <span className="web-source-title">{s.title}</span>
+                <span className="web-source-url">{s.url}</span>
+                {s.snippet !== undefined && s.snippet !== '' && (
+                  <span className="web-source-snippet">{s.snippet}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
     </section>

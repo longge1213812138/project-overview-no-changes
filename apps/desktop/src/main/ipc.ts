@@ -33,7 +33,8 @@ import type {
   GatewayState,
   MemoryKind,
   MemoryListFilter,
-  ScheduleScope
+  ScheduleScope,
+  WebAccessConfig
 } from '@fairy/core'
 import {
   createSession,
@@ -45,6 +46,8 @@ import {
   stopChat
 } from './chat'
 import { getPendingApprovals, respondApproval } from './agent-approval'
+import { syncWebTools } from './agent-tools'
+import { getWebConfig, saveWebConfig, testWebSearch } from './web'
 import { getFloatWindow, getMainWindow } from './windows'
 import { log } from './logger'
 import { getEventStore } from './events'
@@ -237,6 +240,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.channelStart, () => startGatewayAction())
   ipcMain.handle(IPC.channelStop, () => stopGatewayAction())
   ipcMain.handle(IPC.channelTest, (_event, message: string) => channelTest(message))
+
+  // ===== 阶段 10：联网检索（DEV_PLAN §5.10；仅 API 通道；保存后同步重装联网工具） =====
+  ipcMain.handle(IPC.webGet, () => getWebConfig())
+  ipcMain.handle(IPC.webSave, (_event, patch: unknown) => {
+    if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+      throw new Error('联网配置必须是对象')
+    }
+    const result = saveWebConfig(patch as Partial<WebAccessConfig>)
+    // 开关/条数变化 → 立刻重装（关闭则卸载，模型不再可见 web_search/web_fetch）
+    if (result.ok) syncWebTools()
+    return result
+  })
+  ipcMain.handle(IPC.webSearch, (_event, query: unknown) =>
+    testWebSearch(typeof query === 'string' ? query : '')
+  )
 
   // 外链一律系统浏览器；只放行 http/https，其他协议 reject
   ipcMain.handle('app:openExternal', async (_event, url: unknown) => {

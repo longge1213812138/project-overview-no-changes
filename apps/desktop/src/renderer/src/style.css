@@ -1832,3 +1832,104 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ===== 阶段 10：气泡下方的联网来源列表（编号与正文 [n] 对应） ===== */
+.web-sources {
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 4px;
+  padding: 5px 10px 6px;
+  border: 1px solid rgba(107, 114, 128, 0.25);
+  border-radius: 8px;
+  background: rgba(79, 70, 229, 0.05);
+  font-size: 11.5px;
+}
+.web-sources-title {
+  display: block;
+  margin-bottom: 3px;
+  color: rgba(107, 114, 128, 0.95);
+}
+.web-sources ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.web-sources li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.web-source-id {
+  flex-shrink: 0;
+  color: #4f46e5;
+  font-weight: 600;
+}
+.web-source-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: rgba(107, 114, 128, 0.5);
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.web-source-link:hover { text-decoration-color: #4f46e5; }
+
+/* ===== 阶段 10：设置页「联网检索」区 ===== */
+.web-settings { margin-top: 10px; }
+.web-form {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(107, 114, 128, 0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.web-form .setting-form { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.web-form textarea {
+  padding: 7px 10px;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-family: Consolas, monospace;
+  resize: vertical;
+}
+.web-form textarea:focus { outline: none; border-color: #4f46e5; }
+.web-test { margin-top: 10px; }
+.web-test .test-row { align-items: center; }
+.web-test-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(107, 114, 128, 0.25);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.web-test-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.web-source-title { font-weight: 600; }
+.web-source-url {
+  color: rgba(107, 114, 128, 0.95);
+  font-family: Consolas, monospace;
+  word-break: break-all;
+}
+.web-source-snippet { opacity: 0.8; line-height: 1.5; }
+

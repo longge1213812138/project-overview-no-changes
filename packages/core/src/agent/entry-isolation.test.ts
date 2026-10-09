@@ -29,7 +29,15 @@ const WEB_UNSAFE_EXPORTS = [
   'createCronStore',
   'createCronAuthorizer',
   'planTrigger',
-  'planRecovery'
+  'planRecovery',
+  // 阶段 10：联网检索执行面（网络 I/O 与解析器同样不许进 renderer）
+  'searchWeb',
+  'fetchWebPage',
+  'normalizeWebAccessConfig',
+  'checkWebUrl',
+  'parseSearchResultsHtml',
+  'extractReadableText',
+  'createWebTools'
 ];
 
 describe('renderer 入口隔离（index.web）', () => {

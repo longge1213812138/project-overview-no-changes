@@ -50,7 +50,8 @@ import type {
   MessageDto,
   ScheduleScope,
   SessionMeta,
-  SessionStore
+  SessionStore,
+  WebSourceRef
 } from '@fairy/core'
 import { cancelAllPending, requestApproval } from './agent-approval'
 import { getToolRegistry, initAgentTools, probeToolsSupportCached } from './agent-tools'
@@ -58,6 +59,8 @@ import { initSkills } from './skills'
 import { initMcp } from './mcp'
 import { resolveActiveChannel } from './channel'
 import type { ActiveChannel } from './channel'
+import { runWebRetrieval } from './web'
+import type { WebRetrieval } from './web'
 import { getEventStore } from './events'
 import { createIdleExtractor } from './extract'
 import type { IdleExtractor } from './extract'
@@ -317,6 +320,29 @@ async function runGeneration(
     scheduleExtra = ''
   }
 
+  // ②c 阶段 10 联网检索（§5.10）：触发判定 → 检索/抓取 → 过滤 → 引用块。
+  //   仅 API 通道（与「工具调用仅 API 通道」同取向），且只在 intent==='chat' 时做
+  //   （记忆/日程动作不需要外部资料）；异常一律按「检索失败」告知模型，绝不中断回复。
+  let webSources: WebSourceRef[] = []
+  let webContext = ''
+  try {
+    if (resolved.channel === 'api' && intent.intent === 'chat') {
+      // 联网可能耗时数秒 → 先给可见的阶段提示（note 缺省即清掉），避免用户以为卡住
+      broadcast(IPC.chatBusy, { sessionId, note: '🌐 联网检索中…' } satisfies ChatBusyEvent)
+      try {
+        const retrieval: WebRetrieval | null = await runWebRetrieval(text, signal)
+        if (retrieval !== null) {
+          webContext = retrieval.block
+          webSources = retrieval.sources
+        }
+      } finally {
+        broadcast(IPC.chatBusy, { sessionId } satisfies ChatBusyEvent) // 清掉阶段提示
+      }
+    }
+  } catch (err) {
+    log.warn('[web]', `联网检索阶段失败，按 chat 继续：`, err instanceof Error ? err.message : err)
+  }
+
   // ③ 记忆检索注入（top-8 FTS5）+ 动作确认语（§5.2 注入格式）
   const extraParts: string[] = []
   try {
@@ -336,6 +362,8 @@ async function runGeneration(
     extraParts.push(scheduleNote)
     extraParts.push(confirmNote)
   }
+  // 阶段 10：联网资料块排在最后（资料 → 引用规范 → 回答），紧邻生成前注入
+  if (webContext !== '') extraParts.push(webContext)
   const systemExtra = extraParts.filter((part) => part.trim() !== '').join('\n\n')
 
   // buildContext 含刚落的 user 消息（system 提示词在 core 内拼接，不落库）
@@ -352,7 +380,10 @@ async function runGeneration(
   }
   const emitDone = (event: ChatDoneEvent): void => {
     // 阶段 7：有能力提示则附上（ok/aborted/error 各路径统一）
-    broadcast(IPC.chatDone, capabilityHint !== undefined ? { ...event, capabilityHint } : event)
+    // 阶段 10：来源列表同步下发（聊天/中止/出错各路径都要让用户看见这次用了哪些资料）
+    let payload = capabilityHint !== undefined ? { ...event, capabilityHint } : event
+    if (webSources.length > 0) payload = { ...payload, sources: webSources }
+    broadcast(IPC.chatDone, payload)
   }
 
   try {
@@ -432,7 +463,9 @@ async function runGeneration(
         finishReason: result.finishReason ?? 'stop',
         ...(reasoning ? { reasoning } : {}),
         // 阶段 7：能力提示落 meta，重开会话仍可见（否则只存活于当次 chatDone）
-        ...(capabilityHint !== undefined ? { capabilityHint } : {})
+        ...(capabilityHint !== undefined ? { capabilityHint } : {}),
+        // 阶段 10：来源列表落 meta（气泡下方引用列表，重开会话仍在）
+        ...(webSources.length > 0 ? { sources: webSources } : {})
       }
     })
     emitDone({ sessionId, messageId, ok: true, elapsedMs })
@@ -440,16 +473,27 @@ async function runGeneration(
   } catch (err) {
     const elapsedMs = Date.now() - startedAt
 
-    if (isAbortError(err, signal)) {
+    const aborted = isAbortError(err, signal)
+    if (aborted) {
       // 用户主动 stop：保留已生成部分，非错误
-      s.updateMessage(messageId, { content, meta: { aborted: true, elapsedMs } })
+      s.updateMessage(messageId, {
+        content,
+        meta: {
+          aborted: true,
+          elapsedMs,
+          ...(webSources.length > 0 ? { sources: webSources } : {})
+        }
+      })
       emitDone({ sessionId, messageId, ok: true, aborted: true, elapsedMs })
       return
     }
 
     if (err instanceof SessionExpiredError && resolved.channel === 'web') {
       // 会话过期（持续 429 overloaded）：仅网页通道上报托盘红（§5.6.4 指纹仅对网页生效）
-      s.updateMessage(messageId, { content, meta: { error: err.message } })
+      s.updateMessage(messageId, {
+        content,
+        meta: { error: err.message, ...(webSources.length > 0 ? { sources: webSources } : {}) }
+      })
       emitDone({
         sessionId,
         messageId,
@@ -462,7 +506,10 @@ async function runGeneration(
     }
 
     const message = err instanceof Error ? err.message : String(err)
-    s.updateMessage(messageId, { content, meta: { error: message } })
+    s.updateMessage(messageId, {
+      content,
+      meta: { error: message, ...(webSources.length > 0 ? { sources: webSources } : {}) }
+    })
     emitDone({ sessionId, messageId, ok: false, error: message, elapsedMs })
   } finally {
     cancelAllPending('cancelled') // 阶段 7：生成结束（含中止/报错）清掉悬挂审批

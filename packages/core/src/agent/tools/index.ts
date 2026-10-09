@@ -13,6 +13,7 @@
 import type { ToolRegistration } from '../registry';
 import { createClockTool } from './clock';
 import { createShellTool } from './shell';
+import { createWebTools } from './web';
 import { createWorkspaceFilesTool } from './workspace-files';
 
 export interface BuiltinToolsOptions {
@@ -34,3 +35,4 @@ export * from './pathguard';
 export * from './clock';
 export * from './workspace-files';
 export * from './shell';
+export * from './web';

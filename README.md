@@ -16,7 +16,7 @@ Windows 桌面私人助手：以 **DeepSeek 网页版会话**为 LLM 后端，**
 | 通道选择 | 设置页二选一：**OpenAI 兼容 API**（填 baseUrl+key+model）或 **DeepSeek 网页**（本地网关账号池）；**启动不自动登录**，网页通道需手动点「启动网关」 |
 | 桌面形态 | 托盘常驻、开机自启、系统通知 |
 
-后续路线进度（阶段 7–9，DEV_PLAN §6）：阶段 7 工具循环/Agent/受控 Shell **已验收（tag `m5`）**；阶段 8 Skill+MCP、阶段 9 cron 定时引擎**代码完成**（自动化验收全绿，GUI 人工验收待做）。**不做云同步和多用户**；MVP 及后续仍为本地单用户应用。工具调用仅走 **API 通道**（web 通道不做 tools 适配与测试）。阶段和安全边界见 [`docs/DEV_PLAN.md`](docs/DEV_PLAN.md)。
+后续路线进度（阶段 7–10，DEV_PLAN §6）：阶段 7 工具循环/Agent/受控 Shell **已验收（tag `m5`）**；阶段 8 Skill+MCP、阶段 9 cron 定时引擎、阶段 10 联网检索**代码完成**（自动化验收全绿，GUI 人工验收待做）。**不做云同步和多用户**；MVP 及后续仍为本地单用户应用。工具调用与联网检索仅走 **API 通道**（web 通道不做 tools/联网适配与测试）。阶段和安全边界见 [`docs/DEV_PLAN.md`](docs/DEV_PLAN.md)。
 
 ## 快速开始
 
@@ -52,7 +52,7 @@ pnpm dev
 
 | 文件 | 内容 |
 |---|---|
-| `config.json` | 明文非敏感项：通道选择、API baseUrl/model、网关二进制路径 |
+| `config.json` | 明文非敏感项：通道选择、API baseUrl/model/接口风格、网关二进制路径、联网检索配置（`web` 段，无凭据） |
 | `secrets.dpapi.json` | **凭据保险箱**：DeepSeek 账号+密码+device_id、网关 apiKey、OpenAI API Key，全部 **Windows DPAPI 加密**（绑定当前用户；旧明文自动迁移） |
 | `fairy.db` | SQLite（WAL）：sessions / messages / memories + memory_fts（trigram）/ events / **cron_tasks + cron_runs（阶段 9 定时任务与运行历史）** / kv（带幂等 schema 迁移，版本超限 fail-visible） |
 | `logs/fairy-YYYY-MM-DD.log` | electron-log 按天滚动，保留 7 天；启动/通道/网关/日程/崩溃均留痕 |
@@ -101,7 +101,8 @@ pnpm package:win    # 打包：NSIS 安装包 + 免安装单 EXE → apps/deskto
 | ✅ | 阶段 7 Agent 工具运行时：工具注册表 + 能力探测（API 通道实测 supported）+ 审批 IPC/对话框 + 受控 Shell（白名单 + 工作区路径边界）；227 单测 + 真实 API 端到端 4/4；GUI 验收通过（tag `m5`） |
 | ✅ | 阶段 8 Skill + MCP：技能包发现/启用/指纹防篡改 + MCP stdio 客户端（恒审批、env 走 DPAPI）；自动化验收全绿，待 GUI 人工验收 |
 | ✅ | 阶段 9 cron 定时引擎：迁移 v4 + 时区/DST 感知调度 + 幂等运行记录 + 无人值守预授权/超范围暂停通知 + 「定时」面板；374 单测全绿，待 GUI 人工验收 |
-| 🏷 | `m0` 已打；`m1`-`m5` 归位至 `3b1dcd6`；阶段 8 验收过后打 `m6`，阶段 9（M7）验收过后打 `m7` |
+| ✅ | 阶段 10 联网检索（仅 API 通道）：确定性触发（明确要求/时效信号/给出链接）+ DuckDuckGo 免 Key 检索 + 四道筛选（URL 守卫·域名黑白名单·去重·裁剪）+ `[n]` 编号引用规范 + `web_search`/`web_fetch` 工具（逐次审批）；505 单测全绿，待 GUI 人工验收 |
+| 🏷 | `m0` 已打；`m1`-`m5` 归位至 `3b1dcd6`；阶段 8 验收过后打 `m6`，阶段 9（M7）验收过后打 `m7`，阶段 10（M8）验收过后打 `m8` |
 
 ## 注意
 

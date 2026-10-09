@@ -5,6 +5,37 @@
 
 import type { AgentApprovalRequest, AgentToolNotice, ToolRisk } from './agent/registry';
 import type { ApiStyle } from './llm/types';
+import type { WebAccessConfig } from './web/types';
+
+/**
+ * 阶段 10：联网检索配置（renderer 契约面 = core/web 的 WebAccessConfig）。
+ * 该类型只有数据、不含任何执行逻辑，因此可以安全地经 index.web 暴露给 renderer。
+ */
+export type { WebAccessConfig };
+
+/** 单条来源（用于气泡下方的引用列表；id 与正文 [n] 编号一致） */
+export interface WebSourceRef {
+  id: number;
+  title: string;
+  url: string;
+  snippet?: string;
+}
+
+/** 联网配置保存/试跑的结果 */
+export interface WebActionResult {
+  ok: boolean;
+  error?: string;
+  config?: WebAccessConfig;
+}
+
+/** 设置页「试跑一次检索」的结果（不落会话，仅供链路自检） */
+export interface WebSearchTestResult {
+  ok: boolean;
+  /** ok=false 时的可见原因（超时/引擎返回/解析失败） */
+  error?: string;
+  engine?: WebAccessConfig['engine'];
+  items?: WebSourceRef[];
+}
 
 /** DeepSeek 账号配置（v0.2.11 账号池模式，明文存 %APPDATA%/fairy/config.json，阶段 6 上 DPAPI） */
 export interface GatewayAccountConfig {
@@ -66,6 +97,18 @@ export interface FairyApi {
     stopGateway(): Promise<ChannelState>;
     /** 按当前通道做一轮非流式测试对话 */
     test(message: string): Promise<TestChatResult>;
+  };
+  /**
+   * 阶段 10：联网检索（DEV_PLAN §5.10）。
+   * 仅 API 通道生效；开关与来源范围由用户显式配置（默认开启、每次联网在聊天气泡下留痕）。
+   */
+  web: {
+    /** 当前联网配置（已归一，含默认值） */
+    get(): Promise<WebAccessConfig>;
+    /** 保存联网配置（局部更新；越界值按硬边界夹取） */
+    save(cfg: Partial<WebAccessConfig>): Promise<WebActionResult>;
+    /** 试跑一次检索（验证链路与来源过滤，不落会话） */
+    search(query: string): Promise<WebSearchTestResult>;
   };
   /** 日程（面板手动操作；意图路径在 main 内部直接写库） */
   events: {
@@ -241,11 +284,22 @@ export interface ChatDoneEvent {
    * ok=true 时也可携带（聊天正常完成但工具未启用）。
    */
   capabilityHint?: string;
+  /**
+   * 阶段 10：本轮联网检索用到的来源（编号与正文里的 [n] 一致；同时落 message meta，
+   * 气泡下方引用列表据此渲染）。
+   * 无来源时省略。
+   */
+  sources?: WebSourceRef[];
 }
 
 export interface ChatBusyEvent {
   /** null = 空闲 */
   sessionId: string | null;
+  /**
+   * 阶段 10：忙碌阶段的短文本提示（如「🌐 联网检索中…」，联网可能耗时数秒，须可见）。
+   * 省略/null = 无附加提示（只显示「生成中…」）。
+   */
+  note?: string | null;
 }
 
 /** 审批已结算（main → renderer：对话框关闭原因） */
@@ -294,6 +348,10 @@ export const IPC = {
   channelStart: 'channel:start',
   channelStop: 'channel:stop',
   channelTest: 'channel:test',
+  // ===== 阶段 10：API 通道联网检索（配置 + 设置页试跑） =====
+  webGet: 'web:get',
+  webSave: 'web:save',
+  webSearch: 'web:search',
   eventList: 'event:list',
   eventAdd: 'event:add',
   eventComplete: 'event:complete',

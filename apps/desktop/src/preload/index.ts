@@ -35,7 +35,10 @@ import type {
   SessionMeta,
   SkillListItem,
   TabKey,
-  TestChatResult
+  TestChatResult,
+  WebAccessConfig,
+  WebActionResult,
+  WebSearchTestResult
 } from '@fairy/core'
 
 /**
@@ -75,6 +78,15 @@ contextBridge.exposeInMainWorld(
       startGateway: (): Promise<ChannelActionResult> => ipcRenderer.invoke(IPC.channelStart),
       stopGateway: (): Promise<ChannelState> => ipcRenderer.invoke(IPC.channelStop),
       test: (message: string): Promise<TestChatResult> => ipcRenderer.invoke(IPC.channelTest, message)
+    },
+
+    // ===== 阶段 10：联网检索（仅 API 通道；开关与来源范围由用户在设置页决定） =====
+    web: {
+      get: (): Promise<WebAccessConfig> => ipcRenderer.invoke(IPC.webGet),
+      save: (cfg: Partial<WebAccessConfig>): Promise<WebActionResult> =>
+        ipcRenderer.invoke(IPC.webSave, cfg),
+      search: (query: string): Promise<WebSearchTestResult> =>
+        ipcRenderer.invoke(IPC.webSearch, query)
     },
 
     // ===== 阶段 5：日程（eventChanged 双路广播：面板手动操作 + 聊天管道/通知轮询） =====

@@ -8,7 +8,8 @@ import type {
   ChatBusyEvent,
   ChatDeltaEvent,
   ChatDoneEvent,
-  MessageDto
+  MessageDto,
+  WebSourceRef
 } from '@fairy/core'
 import 'highlight.js/styles/github-dark.css'
 
@@ -40,6 +41,8 @@ interface LocalMessage {
   streaming: boolean
   /** 阶段 7：能力提示（ChatDoneEvent.capabilityHint，气泡下方小灰条） */
   hint: string
+  /** 阶段 10：本轮联网来源（meta.sources，气泡下方引用列表） */
+  sources: WebSourceRef[]
 }
 
 const EXAMPLE_PROMPTS = [
@@ -71,6 +74,32 @@ function metaString(meta: MessageDto['meta'], key: string): string {
   return typeof v === 'string' ? v : ''
 }
 
+/**
+ * meta.sources 容错解析（阶段 10）：只接受 {id:number, title:string, url:string} 形状的条目，
+ * 脏数据整条丢弃（渲染层不信任任何历史落盘内容）。
+ */
+function metaSources(meta: MessageDto['meta']): WebSourceRef[] {
+  const v = meta?.['sources']
+  if (!Array.isArray(v)) return []
+  const out: WebSourceRef[] = []
+  for (const raw of v) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const item = raw as Record<string, unknown>
+    if (typeof item['id'] !== 'number' || !Number.isFinite(item['id'])) continue
+    if (typeof item['title'] !== 'string' || typeof item['url'] !== 'string') continue
+    if (item['url'].trim() === '') continue
+    out.push({
+      id: item['id'],
+      title: item['title'],
+      url: item['url'],
+      ...(typeof item['snippet'] === 'string' && item['snippet'] !== ''
+        ? { snippet: item['snippet'] }
+        : {})
+    })
+  }
+  return out
+}
+
 /** delta → 追加到对应条目（找不到则收养乐观占位 / 末尾新建） */
 function appendDelta(
   list: LocalMessage[],
@@ -94,7 +123,8 @@ function appendDelta(
           reasoning: kind === 'reasoning' ? text : '',
           error: null,
           streaming: true,
-          hint: ''
+          hint: '',
+          sources: []
         }
       ]
     }
@@ -127,6 +157,8 @@ function finalizeMessage(list: LocalMessage[], e: ChatDoneEvent): LocalMessage[]
   const msg: LocalMessage = { ...next[idx] }
   if (msg.dbId === null) msg.dbId = e.messageId
   msg.streaming = false
+  // 阶段 10：本轮来源随 done 落到条目上（空数组 = 本轮未联网）
+  if (e.sources !== undefined) msg.sources = e.sources
   // 阶段 7：通道能力提示随 done 落到条目上（非空才展示）
   if (e.capabilityHint) msg.hint = e.capabilityHint
   if (!e.ok && e.error) msg.error = e.error
@@ -142,6 +174,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
   const [busySessionId, setBusySessionId] = useState<string | null>(null)
   /** 最近一条工具执行状态行（只在 busy 期间展示，见 onToolNotice 订阅） */
   const [toolStatus, setToolStatus] = useState<string | null>(null)
+  /** 阶段 10：忙碌阶段短文本（如「🌐 联网检索中…」），随每次 busy 事件刷新 */
+  const [busyNote, setBusyNote] = useState<string | null>(null)
 
   const busy = busySessionId === sessionId
 
@@ -176,6 +210,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             content: row.content,
             reasoning: metaString(row.meta, 'reasoning'),
             hint: metaString(row.meta, 'capabilityHint'),
+            sources: metaSources(row.meta),
             error: metaString(row.meta, 'error') || null,
             streaming: false
           }))
@@ -201,7 +236,11 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
       if (e.sessionId !== sessionRef.current) return
       setMessages((prev) => finalizeMessage(prev, e))
     })
-    const offBusy = window.fairy.chat.onBusy((e: ChatBusyEvent) => setBusySessionId(e.sessionId))
+    // 阶段 10：note 随事件刷新（缺省/null 即清空，不会残留上一轮的提示）
+    const offBusy = window.fairy.chat.onBusy((e: ChatBusyEvent) => {
+      setBusySessionId(e.sessionId)
+      setBusyNote(e.note ?? null)
+    })
     // 阶段 7：工具执行状态（按当前 sessionId 过滤；preload agent 面未就绪则不订阅）
     const agentApi = window.fairy.agent
     const offNotice = agentApi?.onToolNotice
@@ -257,7 +296,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           reasoning: '',
           error: null,
           streaming: false,
-          hint: ''
+          hint: '',
+          sources: []
         },
         {
           key: asstKey,
@@ -267,7 +307,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           reasoning: '',
           error: null,
           streaming: true,
-          hint: ''
+          hint: '',
+          sources: []
         }
       ])
       stickRef.current = true
@@ -355,6 +396,26 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             {m.role === 'assistant' && m.hint !== '' && (
               <div className="capability-hint">{m.hint}</div>
             )}
+            {/* 阶段 10：联网来源（与正文里的 [n] 编号对应；点击走系统浏览器） */}
+            {m.role === 'assistant' && m.sources.length > 0 && (
+              <div className="web-sources">
+                <span className="web-sources-title">🌐 本次参考了 {m.sources.length} 个来源</span>
+                <ul>
+                  {m.sources.map((s) => (
+                    <li key={`${s.id}-${s.url}`}>
+                      <span className="web-source-id">[{s.id}]</span>
+                      <button
+                        className="web-source-link"
+                        title={s.url}
+                        onClick={() => void window.fairy.openExternal(s.url)}
+                      >
+                        {s.title === '' ? s.url : s.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -389,6 +450,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           <span>Enter 发送 · Shift+Enter 换行</span>
           <span className="foot-status">
             {busy && toolStatus && <span className="tool-status">{toolStatus}</span>}
+            {busy && busyNote && <span className="tool-status">{busyNote}</span>}
             {busy && <span className="gen-hint">生成中…</span>}
           </span>
         </div>

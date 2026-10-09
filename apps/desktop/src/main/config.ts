@@ -21,7 +21,13 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import type { ApiChannelConfig, ChannelKind, GatewayAccountConfig } from '@fairy/core'
+import type {
+  ApiChannelConfig,
+  ChannelKind,
+  GatewayAccountConfig,
+  WebAccessConfig
+} from '@fairy/core'
+import { normalizeWebAccessConfig } from '@fairy/core'
 import { readSecrets, writeSecrets } from './secrets'
 import type { SecretValues } from './secrets'
 
@@ -45,6 +51,11 @@ export interface FairyConfig {
   skills?: Record<string, SkillStateEntry>
   /** 阶段 8：MCP 服务器配置（env 内存视图来自 DPAPI 密件，明文落盘时剥离） */
   mcpServers?: McpServerConfig[]
+  /**
+   * 阶段 10：联网检索配置（DEV_PLAN §5.10；明文，无凭据字段）。
+   * 缺省 = 未显式配置 → getWebConfig() 返回 core 的默认值。
+   */
+  web?: WebAccessConfig
 }
 
 /** 单个技能的启用状态（config.json 明文字段，无凭据） */
@@ -76,6 +87,8 @@ interface PlaintextConfig {
   skills?: Record<string, SkillStateEntry>
   /** MCP 明文部分：env 一律剥离（进密件） */
   mcpServers?: { name: string; command: string; args: string[]; cwd?: string }[]
+  /** 阶段 10：联网检索配置（无凭据，整份明文）；原始形态，归一在 assemble 里做 */
+  web?: unknown
 }
 
 /** 本机已知 ds-free-api 安装目录（docs/llm-bridge-notes.md §2/§6，阶段 2 探测位 ②） */
@@ -241,6 +254,8 @@ function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
       ...(mcpEnv[s.name] !== undefined ? { env: mcpEnv[s.name] } : {})
     }))
   }
+  // 阶段 10：联网配置容脏（缺字段按 core 默认值补齐，越界值夹取，绝不因脏配置崩溃）
+  cfg.web = normalizeWebAccessConfig(plain.web)
   return cfg
 }
 
@@ -265,6 +280,7 @@ function strip(cfg: FairyConfig): PlaintextConfig {
       ...(s.cwd !== undefined ? { cwd: s.cwd } : {})
     }))
   }
+  plain.web = normalizeWebAccessConfig(cfg.web)
   return plain
 }
 
@@ -334,7 +350,8 @@ export function loadConfig(): FairyConfig {
               }
             : undefined,
         skills: normalizeSkills(o['skills']),
-        mcpServers: normalizeMcpPlain(o['mcpServers'])
+        mcpServers: normalizeMcpPlain(o['mcpServers']),
+        web: o['web']
       }
       const cfg = assemble(plain, secrets)
       if (migrated) {

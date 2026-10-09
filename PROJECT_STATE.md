@@ -1,6 +1,6 @@
 # Fairy 项目交接材料
 
-> 交接编号：**H11**（H8/H9/H10 同对话前序快照）｜ 状态：**阶段 7 GUI 验收通过（tag `m5`）；阶段 8（Skill+MCP）与阶段 9（cron）代码完成、自动化验收全绿（409 单测），GUI 人工验收待做（清单 §5 ⑤/⑥）；MVP GUI/干净虚拟机验收待做；下一步 = 阶段 8+9 GUI 验收 → tag m6/m7** ｜ 更新时间：2026-10-05
+> 交接编号：**H12**（H8/H9/H10/H11 同对话前序快照）｜ 状态：**阶段 7 GUI 验收通过（tag `m5`）；阶段 8（Skill+MCP）与阶段 9（cron）代码完成、自动化验收全绿，GUI 人工验收待做（清单 §5 ⑤/⑥）；阶段 10（API 通道联网检索）代码完成、自动化验收全绿（505 单测），GUI 人工验收待做（清单 §5 ⑦）；MVP GUI/干净虚拟机验收待做；下一步 = 阶段 8+9+10 GUI 验收 → tag m6/m7/m8** ｜ 更新时间：2026-10-07
 > 工作目录（绝对路径）：`C:\Users\91533\Desktop\Fairy`
 > **本次开发实际工作目录**：`C:\Users\91533\Desktop\Fairy.worktrees\project-overview-no-changes`（git worktree，main 分支）
 
@@ -9,7 +9,7 @@
 - **目标**：Fairy = Windows 桌面私人助手，以 **DeepSeek 网页版**（chat.deepseek.com 会话）为 LLM 后端，零 API 成本。MVP 范围 F1–F7 见 `docs/DEV_PLAN.md` §1。
 - **范围（MVP）**：聊天（流式）、多会话、"帮我记东西"、日程+托盘通知、FTS5 长期记忆、托盘/Alt+Space 浮窗/开机自启、登录引导流。
 - **MVP 后续范围（用户决定，2026-10-03）**：阶段 7–9：工具循环/Agent/本地 Shell、Skill、MCP、cron 定时引擎；**不做云同步和多用户**，产品保持本地单用户。
-- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/审批 IPC/受控 Shell **GUI 验收已通过**（「第二次审批框不弹」四轮修复破案=审批 id 被 registry 负载 id 覆盖，修复⑤+回归测试钉死）。**阶段 8 Skill+MCP（`5268007`/`0f4f13b`）与阶段 9 cron 定时引擎代码完成 + 自动化验收全绿（409 单测），待 GUI 人工验收（§5 ⑤/⑥）**；M5–M7 三阶段代码全部完成。
+- **完成标准**：M0–M4 为 MVP；当前 MVP 阶段 2/3/4/5 + 通道选择 + 阶段 6 打包硬化代码完成（待 GUI 验收 + 干净虚拟机验收）。阶段 7 工具循环/注册表/审批 IPC/受控 Shell **GUI 验收已通过**（「第二次审批框不弹」四轮修复破案=审批 id 被 registry 负载 id 覆盖，修复⑤+回归测试钉死）。**阶段 8 Skill+MCP 与阶段 9 cron 定时引擎代码完成 + 自动化验收全绿（409 单测），待 GUI 人工验收（§5 ⑤/⑥）**；M5–M7 三阶段代码全部完成。**阶段 10 联网检索（2026-10-07）代码完成 + 自动化验收全绿（505 单测），待 GUI 人工验收（§5 ⑦）**。
 - **git 位置**：历史（当前唯一提交 = 根提交 `b001520 "MVP"`，81 文件）：
   - `bf06919` 阶段 0：pnpm workspace + Electron 骨架 + 图标 + NSIS 打包通过
   - `b9932fe` docs：附录 C 本机环境备忘
@@ -82,15 +82,16 @@
 | 阶段 7 Agent 工具运行时 | ✅ **代码完成（2026-10-03），待 GUI 人工验收** | core：`agent/runtime`（有界循环+授权决策 allowOutside/reason 穿透）、`agent/registry`（ToolRegistry + createRegistryAuthorizer，风险/审批/assess 策略，默认拒绝）、`agent/capability`（probeToolsSupport 两段探测三态）、`agent/tools`（pathguard 真实路径边界 + workspace_files + get_current_time + 受控 shell：白名单9命令/危险名单先查/spawn 无 shell/最小 env/输出截断）。main：`agent-approval.ts`（广播审批+60s超时拒绝+停止取消+全日志）、`agent-tools.ts`（workspace=%APPDATA%/fairy/workspace + 注册表装配 + 探测缓存）、chat 接线（通道门控+capabilityHint+toolNotice 广播）、浮窗 Esc 豁免。renderer：`ApprovalDialog`（队列/默认拒绝/Esc拒绝/越界红条）+ ChatPane 状态行/hint 灰条（落 meta 重开仍在）。证据：**227 单测 + 4 E2E 全绿、全仓 typecheck 绿、build 绿、bundle 实测无 OS 执行器、真实 agnes API 探测=supported(required)**。Shell 边界=白名单+路径边界+进程管控（**非 OS 级沙箱**，本机无原生依赖；DEV_PLAN 阶段 7 实施备注已如实声明）。**提交链**：`200da53`主体 → `cf88e41`/`2dfdf7f`/`41948d7`/`50f9a22` 审批框 GUI 缺陷四轮修复 → 修复⑤ 根因（审批 id 主权）+ 回归测试 3 项（详见 §5 ③ 进展实录）。 |
 | 阶段 8 Skill+MCP | ✅ **代码完成（2026-10-04），自动化验收全绿，待 GUI 人工验收** | core：`agent/skill`（skill.json 严格解析 fail-visible / 发现+内容指纹 sha256 / electron-as-node 执行器：无 shell+最小 env+超时截断可取消 / 装配）+ `agent/mcp`（JSON-RPC 2.0 行协议 / stdio 客户端生命周期 initialize→tools/list→call、反向请求回 -32601、意外退出可见、taskkill 树杀 / 装配）+ `skill/schema` 零依赖 JSON Schema 子集校验器；main：`skills.ts`（新发现默认禁用、内容变更自动回禁用、状态入 config.json）+ `mcp.ts`（配置明文、**env 走 DPAPI**、用户驱动连接、退出树杀）+ IPC/preload（skills:* 与 mcp:*）；renderer：设置页「技能」区 + 「MCP 服务器」区。安全不变量：skill/mcp **审批恒 ask**、mcp risk 恒 exec、权限/来源进审批描述；**入口隔离**（执行面不进 index.web，测试断言）。证据：**skill 41 + mcp 17 新增测试，全仓 282+3 单测 + typecheck + build 全绿**；GUI 样例 `examples/skills/demo-echo`（含验收 README）+ `examples/mcp-demo-server.js`。**提交链**：`5268007`（Skill）→ `0f4f13b`（MCP）。 |
 | 阶段 9 cron 定时引擎 | ✅ **代码完成（2026-10-05），自动化验收全绿，待 GUI 人工验收** | **迁移 v4**：`cron_tasks`（next_run_at/last_fired_at/preauthorized JSON/catchup/max_retries/failure_limit/consecutive_failures/pause_reason）+ `cron_runs`（**UNIQUE(task_id,scheduled_for) 幂等键**、attempt/manual/next_retry_at/output/error）。core `agent/cron`：`schedule`（5 字段 cron+宏、Vixie OR、Intl 时区、DST 缺口跳过/重叠取早、latestDue 错过合并、未来无触发保存期拒绝，38 测）+ `store`（幂等 claim、并发 skipped、状态迁移守卫、失败暂停，27 测）+ `policy`（planTrigger/planRecovery 纯决策、**预授权硬条件+越界永不授予+升级暂停**、无人值守提示词，14 测）+ 迁移 3 测；main `cron.ts`（10s tick、启动恢复 running→interrupted/陈旧 pending 按 catchup、串行执行队列、仅 API 通道门控、超范围/连续失败→暂停+通知点通知切「定时」tab、重试指数退避、IPC 面）+ 7 驱动测试；renderer：底部「定时」tab `CronPanel`（新建/编辑/暂停/恢复/立即运行/删除/运行历史展开）。**入口隔离**：cron 执行面不进 index.web（断言 createCronStore/createCronAuthorizer/planTrigger/planRecovery）。证据：**全仓 409 单测 + typecheck + build 全绿**；语义与验收对照见 DEV_PLAN 阶段 9 实施备注。 |
+| 阶段 10 联网检索（API 通道） | ✅ **代码完成（2026-10-07），自动化验收全绿，待 GUI 人工验收** | core `web/`：`types`（WebAccessConfig + 默认值）/ `urlguard`（协议·凭据·端口·IPv4/IPv6 私有段守卫 + 去重键 + 域名后缀匹配）/ `html`（零依赖：DDG 结果页抽取、页面正文抽取、内联标签不插空格）/ `search`（searchWeb 四道筛选 + fetchWebPage + 配置归一 + 中止抛 Abort）/ `trigger`（三类触发 + 排除面 + 检索词清洗，纯规则零 LLM 调用）/ `citations`（[n] 编号引用块 + 五条引用规范 + 失败说明）；工具 `agent/tools/web.ts`（`web_search`/`web_fetch`，approval 恒 **ask** / risk **read**，fetch 的 URL 守卫在 assess 即 deny）。main：`web.ts`（配置读写 + 检索编排 + 总预算 + 试跑）、`config.ts` 新增 `web` 段、`agent-tools.ts` 新增 `syncWebTools()`（开关关即卸载）、`chat.ts` 在 §5.1 ②c 注入引用块（仅 API 通道且 intent=chat）、sources 走 chatDone + meta 双路；renderer：设置页「联网检索」区（开关/条数/白黑名单/试跑）+ ChatPane 气泡下来源列表（点开走系统浏览器）。**入口隔离**：8 个执行面导出只进完整入口，entry-isolation 断言。证据：**core 新增 82（urlguard 16/html 10/search 20/trigger 14/citations 9/tools web 13）+ desktop 新增 14，全仓 505 单测 + typecheck + build 全绿**；语义对照见 DEV_PLAN §5.10。 |
 | 接口风格 Responses（插入需求） | ✅ **完成（2026-10-05），自动化验收全绿** | 设置页 API 表单新增「接口风格」选择：**Chat Completions**（默认，`…/v1/chat/completions`）/ **Responses**（`…/v1/responses`），落 `config.json api.apiStyle`（老配置缺省归一 chat）。core：`llm/responses.ts` 协议适配（ChatMessage[]→`input` 项含 function_call/function_call_output、扁平 tools、`max_output_tokens`、非流式 `output[]` 解析、流式事件累计 completed/failed/incomplete、空 arguments 归一 `{}`、failed 抛错不伪装成功）+ `client.ts` 按风格**端点归一**（完整方法路径换/保后缀不二次拼接、`…/v1` 直接接方法名，修复 `/v1` 再拼 `/v1/v1` 隐患）并抽出**共用 `consumeSse`**（chat 路径行为回归不变）。main：saveApi 校验+持久化 style、resolveActiveChannel 带 apiStyle、**探测缓存键含风格**；preload/契约 `ApiChannelConfig.apiStyle` / `ChannelState.api.style`；设置页状态条回显风格。聊天/意图/抽取/工具探测/cron 全部自动跟随风格。证据：**409 单测（llm 新增 35：协议 25 + HTTP 集成 10）+ typecheck + build 全绿**。 |
 
-代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7；skill/mcp，阶段 8；**cron/schedule+store+policy，阶段 9——均仅完整入口，执行面不进 renderer**）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools/skills/mcp/cron；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/CronPanel/SettingsTab（含技能区+MCP 区）+ ApprovalDialog + 底部 tab（聊天/日程/记忆/定时/设置）。**尚未做**：阶段 8 与阶段 9 GUI 人工验收（清单 §5 ⑤/⑥）、MVP GUI 验收、干净虚拟机验收。
+代码现状：`packages/core` 含 llm/gateway/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7；skill/mcp，阶段 8；**cron/schedule+store+policy，阶段 9**；均仅完整入口，执行面不进 renderer）+ `web`（阶段 10 联网检索，同样仅完整入口）；main 含 config/secrets/logger/autostart/diagnostics/sidecar/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools/skills/mcp/cron/**web**；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/CronPanel/SettingsTab（含技能区+MCP 区+**联网区**）+ ApprovalDialog + 底部 tab（聊天/日程/记忆/定时/设置）。**尚未做**：阶段 8/9/10 GUI 人工验收（清单 §5 ⑤/⑥/⑦）、MVP GUI 验收、干净虚拟机验收。
 
 **已解决/已知事实**（原“未确认项”已全部落地）：ds-free-api v0.2.11 本机下载+运行 OK；账号池+device_id 登录 OK（应用侧凭据由 DPAPI 保护；网关运行配置含临时明文，停止/退出即删，勿入 git）。
 
 ## 5. 接续动作
 
-**当前并行事项**：① **【阻塞在用户侧】阶段 8 GUI 人工验收**（清单见 §5 ⑤，样例 `examples/skills/demo-echo` + `examples/mcp-demo-server.js`，需 `pnpm dev` 重启）；② **【阻塞在用户侧】阶段 9 GUI 人工验收**（清单见 §5 ⑥，同一次 `pnpm dev` 可一并做）；③ MVP GUI/干净虚拟机验收（web 项等 10-11 解禁）；④ 两项验收通过后打 tag `m6`（阶段 8=M6）/`m7`（阶段 9=M7）。
+**当前并行事项**：① **【阻塞在用户侧】阶段 8 GUI 人工验收**（清单见 §5 ⑤，样例 `examples/skills/demo-echo` + `examples/mcp-demo-server.js`，需 `pnpm dev` 重启）；② **【阻塞在用户侧】阶段 9 GUI 人工验收**（清单见 §5 ⑥）；③ **【阻塞在用户侧】阶段 10 联网检索 GUI 人工验收**（清单见 §5 ⑦，需 API 通道 + 外网可达）；④ MVP GUI/干净虚拟机验收（web 项等 10-11 解禁）；⑤ 三项验收通过后打 tag `m6`（阶段 8）/`m7`（阶段 9）/`m8`（阶段 10）。
 
 **① GUI 验收清单（阶段 2/3/4/5 + 通道选择合并，DEV_PLAN §6 各阶段验收 + §9 M2/M3）**：
 1. `pnpm dev`（新终端，Node 24，`ELECTRON_RUN_AS_NODE` 未被继承）。
@@ -160,6 +161,7 @@
 1. **收尾（MVP 验收）**：MVP GUI 验收清单①剩余项补验（web 通道项等账号 2026-10-11 解禁）→ 干净虚拟机验收（清单第 8 条 = 阶段 6/M4）→ ~~tag 归位~~ ✅ **已执行（2026-10-04）**：`m1`/`m2`/`m3` 移至 `3b1dcd6`、补打 `m4`，与 `m5` 同点；剩余 = 试用反馈。
 2. ~~**阶段 8（M6）：Skill 与 MCP**~~ → ✅ **代码完成（2026-10-04，`5268007` Skill + `0f4f13b` MCP）**，自动化验收全绿；设计前置（信任/分发/沙箱/凭据策略）已按 DEV_PLAN §5.8 细化并写入实施备注（默认禁用+指纹防篡改+恒 ask+无网络安装+env 走 DPAPI+不自动连接外部进程），**待用户推翻或 GUI 验收（清单⑤）**。
 3. ~~**阶段 9（M7）：cron 定时引擎**~~ → ✅ **代码完成（2026-10-05）**，按 DEV_PLAN v0.3 阶段 9 三条落地：迁移 v4（cron_tasks/cron_runs 幂等键）、时区/DST/错过/重启/并发/失败语义、预授权+超范围暂停通知、「定时」tab 查看/暂停/恢复/编辑/删除入口。**已确认语义与测试证据全部写入 DEV_PLAN 阶段 9 实施备注**；409 单测 + typecheck + build 全绿。**待 GUI 人工验收（清单⑥）→ 过后打 tag `m7`**。
+4. **阶段 10（M8）：API 通道联网检索** → ✅ **代码完成（2026-10-07）**：core `web/`（触发判定/URL 守卫/HTML 抽取/检索引擎/抓取/引用编排）+ 工具 `web_search`/`web_fetch`（恒 ask / read）+ main `web.ts` 编排与配置 + chat 管线注入 + 设置页联网区 + 气泡来源列表；**505 单测 + typecheck + build 全绿**。触发口径（三类触发 + 排除面 + 仅 API 通道）、来源范围（域名白黑名单/URL 守卫）、数据筛选四道、引用规范（[n] 编号 + 禁编造）与失败语义全部写入 DEV_PLAN §5.10。**待 GUI 人工验收（清单⑦）→ 过后打 tag `m8`**。
 
 **⑤ 阶段 8 GUI 人工验收清单（2026-10-04 拟定；样例与步骤见 `examples/skills/README.md`）**
 
@@ -192,10 +194,25 @@
 12. **与日程分开**：定时任务不出现在日程 tab；日程提醒（阶段 5）不进运行历史；两边互不影响。
 13. **重启恢复不重复**：连续重启两次，历史不因重启多出重复记录（幂等键；日志无同刻两条 `触发`）。
 
+**⑦ 阶段 10 联网检索 GUI 人工验收清单（2026-10-07 拟定；需 API 通道 + 本机可访问 duckduckgo.com）**
+
+> 语义基准 = DEV_PLAN §5.10；日志看 `%APPDATA%/fairy/logs/fairy-*.log` 的 `[web]` / `[tools]` 行。
+
+1. **默认态与开关**：设置 →「联网检索」默认**开启**；关掉再开启 → 保存提示出现，日志随之出现「web_search / web_fetch 未注册」或「联网工具已注册」（工具随开关装配/卸载）。
+2. **明确要求触发**：聊天「联网搜一下 Node LTS 的最新版本号」→ 日志 `[web] 触发联网 kind=explicit` → 回复给出版本并**句末带 [n] 编号**；气泡下方出现「🌐 本次参考了 N 个来源」列表，点条目 → 系统浏览器打开对应链接。
+3. **时效信号触发**：聊天「最新的 Electron 版本是多少」「今天上海天气」→ `kind=freshness`；闲聊/创作类指令（「帮我写一封请假邮件」「刚才我说了什么」）日志 `未命中联网触发规则`，气泡下方**无**来源列表。
+4. **直达链接**：发一条含 `https://example.com` 之类链接的消息 → `kind=link` → 该页被抓取，来源列表出现该链接。
+5. **工具路径需每次确认**：让模型主动调用（`用 web_search 查一下 X`）→ **弹审批框**（只读徽标）、允许后才执行；诱导模型抓取 `http://127.0.0.1/` 或 `http://169.254.169.254/` 一类内网地址 → **不弹审批、直接在 assess 阶段拒绝**，日志可见拒绝原因。
+6. **来源范围白/黑名单**：设置页白名单填 `python.org` → 检索「python 教程」→ 结果只剩该域名；黑名单填某域名 → 该域名结果消失（试跑按钮即可复现）。
+7. **失败可见**：临时断网（或改坏防火墙）后触发 → 回复如实说「这次没查到」且**不编造外部事实**；恢复网络再问 → 正常带来源。
+8. **关闭后零外发**：关闭开关 → 触发类消息不再有 `[web] 触发联网` 之检索行为（日志 `本次未联网（开关关闭）`），且模型看不到 `web_search`/`web_fetch` 工具。
+9. **持久化**：来回切换/重启应用后设置保持不变；历史会话里这一轮的来源列表仍在（落 meta）。
+10. **网页通道不联网**：切到网页通道发同类问题 → 不触发检索（仅 API 通道），气泡下的工具能力灰条说明仍在。
+
 ## 6. 交接简区
 
-- 编号：**H11**（H1-H10 已完成归档；H8/H9/H10=同对话前序快照）
-- 源对话：本机 Pi 会话（阶段 7 GUI 验收闭环 + 阶段 8 Skill/MCP + 阶段 9 cron 实现全程）
-- 状态：**阶段 7 GUI 验收通过（缺陷关闭，tag `m5`）；阶段 8 Skill+MCP 与阶段 9 cron 代码完成、自动化验收全绿，GUI 人工验收待执行（清单 §5 ⑤/⑥）**。代码提交至阶段 9 提交（阶段 8：`5268007` Skill + `0f4f13b` MCP；阶段 9 见下方提交链），worktree main 分支全部已提交；**409 单测**（core 399 + desktop 10）+ typecheck + build 全绿；tag `m1`-`m5` 在 `3b1dcd6`。MVP GUI/干净虚拟机验收待做（web 账号禁言至 2026-10-11）。
-- 用户已确认接续范围：阶段 7 全量（**已完成并验收**）；阶段 8 Skill/MCP（**代码完成待 GUI 验收**）；阶段 9 cron（**代码完成待 GUI 验收**）；工具调用仅 API 通道；web 通道不做 tools；无云同步/多用户。
-- **接续第一步**：① 用户执行 §5 ⑤（阶段 8）+ §5 ⑥（阶段 9）GUI 验收——同一次 `pnpm dev` 可一并走；② 验收通过 → tag `m6`（阶段 8=M6）、`m7`（阶段 9=M7）；③ 并行可做 MVP GUI/干净虚拟机验收收尾。
+- 编号：**H12**（H1-H11 已完成归档；H8/H9/H10/H11=同对话前序快照）
+- 源对话：本机 Pi 会话（阶段 7 GUI 验收闭环 + 阶段 8 Skill/MCP + 阶段 9 cron + 阶段 10 联网检索实现全程）
+- 状态：**阶段 7 GUI 验收通过（缺陷关闭，tag `m5`）；阶段 8 Skill+MCP、阶段 9 cron、阶段 10 联网检索代码完成、自动化验收全绿，GUI 人工验收待执行（清单 §5 ⑤/⑥/⑦）**。代码提交至阶段 9 提交（阶段 8：`5268007` Skill + `0f4f13b` MCP；阶段 9 见下方提交链），**阶段 10 改动尚未提交**（worktree main 分支工作区有改动）；**505 单测**（core 481 + desktop 24）+ typecheck + build 全绿；tag `m1`-`m5` 在 `3b1dcd6`。MVP GUI/干净虚拟机验收待做（web 账号禁言至 2026-10-11）。
+- 用户已确认接续范围：阶段 7 全量（**已完成并验收**）；阶段 8 Skill/MCP（**代码完成待 GUI 验收**）；阶段 9 cron（**代码完成待 GUI 验收**）；阶段 10 联网检索（**代码完成待 GUI 验收**，仅 API 通道、默认开启、每次联网可见）；工具调用仅 API 通道；web 通道不做 tools；无云同步/多用户。
+- **接续第一步**：① 用户执行 §5 ⑤（阶段 8）+ §5 ⑥（阶段 9）+ §5 ⑦（阶段 10）GUI 验收——同一次 `pnpm dev` 可一并走（阶段 10 需外网可达）；② 验收通过 → tag `m6`（阶段 8=M6）、`m7`（阶段 9=M7）、`m8`（阶段 10=M8）；③ 并行可做 MVP GUI/干净虚拟机验收收尾。
