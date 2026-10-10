@@ -98,6 +98,32 @@ describe('web_search 注册项', () => {
     await searchTool.tool.execute({ query: '  Rust 所有权  ' }, {});
     expect(spy).toHaveBeenCalledWith('Rust 所有权', expect.anything());
   });
+
+  /**
+   * 正文摘录透传：模型要靠它一次调用拿到事实（摘要多是首页 SEO 样板），
+   * 空摘录/缺字段一律不落进输出（不给模型掺空壳）。
+   */
+  it('execute：items 带 content 摘录（空摘录不落字段）', async () => {
+    const [searchTool] = createWebTools({
+      search: async (query) => ({
+        query,
+        engine: 'bing' as const,
+        items: [
+          { title: '有正文', url: 'https://a.example/', snippet: '摘要一', content: '页面正文摘录' },
+          { title: '空摘录', url: 'https://b.example/', snippet: '摘要二', content: '   ' },
+          { title: '无字段', url: 'https://c.example/', snippet: '摘要三' }
+        ]
+      }),
+      fetchPage: async (url) => ({ url, title: '', content: '', truncated: false })
+    });
+
+    const out = (await searchTool.tool.execute({ query: 'q' }, {})) as {
+      items: { title: string; content?: string }[]
+    };
+    expect(out.items[0]?.content).toBe('页面正文摘录');
+    expect(out.items[1]).not.toHaveProperty('content');
+    expect(out.items[2]).not.toHaveProperty('content');
+  });
 });
 
 describe('web_fetch 注册项', () => {

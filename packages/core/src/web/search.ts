@@ -47,6 +47,15 @@ import { checkWebUrl, domainMatches, normalizeResultUrl, urlDedupeKey, urlHost }
 export const MAX_TITLE_CHARS = 200;
 /** 摘要上限字符（摘要只用于「值不值得点」，正文由 fetchWebPage 负责） */
 export const MAX_SNIPPET_CHARS = 300;
+/**
+ * 可读正文的最小长度（字符）：低于它的抽取结果按「没有正文」处理。
+ *
+ * 刻意取小：只挡「几乎没正文」的抽取结果（实测中国天气网的省份目录页只有 135 字城市名菜单，
+ * 却被当成成功正文交给模型）。**不试图**识别「两三千字的门户首页导航壳」——那类页面
+ * 与普通页面的文本特征重叠（散文特征/链接占比都区分不开，2026-10 实测 4 个页面标定），
+ * 硬判会误伤文档目录页；对它们靠「一次检索带回正文摘录」让模型自己挑有数据的那条。
+ */
+export const MIN_READABLE_CHARS = 200;
 
 /**
  * 引擎端点（免 Key 的 HTML 端点）与结果页解析器：
@@ -62,8 +71,14 @@ const ENGINE_PARSERS: Record<WebSearchEngine, (html: string) => ParsedSearchResu
   bing: parseBingResultsHtml
 };
 
-/** 内置备用引擎（按序顶替连接类失败的主引擎） */
-const FALLBACK_ENGINES: readonly WebSearchEngine[] = ['bing'];
+/**
+ * 内置备用引擎链：**当前为空——只用主引擎（Bing）**。
+ *
+ * 为什么空：本机 DDG 全域不可达，任何"先试 DDG 再换 Bing"的顺序都等于每次白等 6–12s
+ * （实测首轮搜索 11.3s 全花在死主源上，正文摘录都被挤掉）。降级机件（连接类失败换源、
+ * 不可达短期记忆、降级可见）保留完好，需要备用源时传 `SearchOptions.fallbackEngines`。
+ */
+const FALLBACK_ENGINES: readonly WebSearchEngine[] = [];
 
 /**
  * 「引擎不可达」短期记忆（ms）：连不上/超时的引擎在这段时间内被跳过，
@@ -108,6 +123,19 @@ export interface SearchOptions {
   maxResults?: number;
   /** 本阶段总预算的截止时刻（epoch ms）：单请求超时不得越过它（编排层透传） */
   deadlineAt?: number;
+  /**
+   * 备用引擎链（按序顶替连接类失败的主引擎）。缺省 = 内置链（**当前为空：只用主引擎**）。
+   * 单测与将来新增备用源时用；生产路径不传。
+   */
+  fallbackEngines?: readonly WebSearchEngine[];
+  /**
+   * **单次尝试**的超时上限（ms，仍受 cfg.timeoutMs 与 deadlineAt 夹取）。
+   *
+   * 工具路径（模型主动调用的 web_search）用它压短等待：一次工具调用总时长受运行时
+   * 15s 上限约束，若主源已不可达，默认 12s 的单次超时会把预算吃光——换源与正文摘录
+   * 都没时间做（实测：首轮搜索 11.3s 全花在死主源上，摘录被跳过，模型又只能拿到首页简介）。
+   */
+  attemptTimeoutMs?: number;
   /** 瞬时失败（超时/连接失败/5xx）额外重试次数；默认 0（编排层按预算给 1） */
   retries?: number;
 }
@@ -236,7 +264,9 @@ export function normalizeWebAccessConfig(raw: unknown): WebAccessConfig {
   };
   return {
     enabled: typeof o.enabled === 'boolean' ? o.enabled : DEFAULT_WEB_ACCESS_CONFIG.enabled,
-    engine: o.engine === 'duckduckgo' ? 'duckduckgo' : DEFAULT_WEB_ACCESS_CONFIG.engine,
+    // 引擎固定为默认值（当前 Bing）：历史配置里的 'duckduckgo' 等旧值一律归一，
+    // 不再"先打一个不可达的源再降级"——那等于每条消息白等 6–12s（2026-10 实测）。
+    engine: DEFAULT_WEB_ACCESS_CONFIG.engine,
     maxResults: clampInt(o.maxResults, 1, 10, DEFAULT_WEB_ACCESS_CONFIG.maxResults),
     fetchTopN: clampInt(o.fetchTopN, 0, 3, DEFAULT_WEB_ACCESS_CONFIG.fetchTopN),
     maxPageChars: clampInt(o.maxPageChars, 1000, 20_000, DEFAULT_WEB_ACCESS_CONFIG.maxPageChars),
@@ -280,6 +310,7 @@ async function searchWithEngine(
 ): Promise<EngineAttempt> {
   const fetchImpl = options.fetchImpl ?? ((...args: Parameters<FetchLike>) => fetch(...args));
   const attempts = 1 + clampInt(options.retries, 0, 3, 0);
+  const requestTimeoutMs = Math.min(config.timeoutMs, clampInt(options.attemptTimeoutMs, 1000, 30_000, config.timeoutMs));
   let failure: { error: string; errorKind: WebErrorKind } = {
     error: '检索失败：未执行任何尝试',
     errorKind: 'network'
@@ -290,7 +321,7 @@ async function searchWithEngine(
       if (!hasBudgetForRetry(options.deadlineAt)) break; // 剩余预算不够：如实报上一次的失败
       await sleep(RETRY_DELAY_MS, options.signal);
     }
-    const timer = withTimeout(options.signal, config.timeoutMs, {
+    const timer = withTimeout(options.signal, requestTimeoutMs, {
       reason: '检索请求超时',
       ...(options.deadlineAt !== undefined ? { deadlineAt: options.deadlineAt } : {})
     });
@@ -378,21 +409,26 @@ export async function searchWeb(
   }
   const limit = clampInt(options.maxResults, 1, 10, config.maxResults);
 
-  // 引擎顺序：主引擎（若未被记忆为不可达）→ 内置备用引擎（跳过与主引擎同名者）
+  // 引擎顺序：主引擎（若未被记忆为不可达）→ 备用链（跳过与主引擎同名者）
   const primarySkipped = !engineHealthy(primary, Date.now());
   const order: WebSearchEngine[] = [];
   if (!primarySkipped) order.push(primary);
-  for (const candidate of FALLBACK_ENGINES) {
+  for (const candidate of options.fallbackEngines ?? FALLBACK_ENGINES) {
     if (candidate !== primary) order.push(candidate);
   }
+  // 空链守卫：只剩一个引擎时它必须被尝试（否则「唯一引擎被记忆为不可达」会直接变成
+  // 「未执行任何尝试」——宁可实打实试一次并如实报结果）
+  if (order.length === 0) order.push(primary);
 
   let failure: { error: string; errorKind: WebErrorKind } = {
     error: '检索失败：未执行任何尝试',
     errorKind: 'network'
   };
   let lastEngine: WebSearchEngine = order[order.length - 1] ?? primary;
-  // 主源被短期记忆跳过时也要可见（否则会被当成「配的就是备用源」）
-  let fallback: WebEngineFallback | undefined = primarySkipped
+  // 主源被短期记忆跳过、真的从**别的**引擎起跑时，降级要可见（否则会被当成「配的就是它」）；
+  // 若顺序被空链守卫拉回主引擎（本轮仍是它自己上），则不算降级、不虚报。
+  const startsOnOtherEngine = order[0] !== undefined && order[0] !== primary;
+  let fallback: WebEngineFallback | undefined = startsOnOtherEngine
     ? {
         from: primary,
         reason: `此前判定为不可达（${Math.round(ENGINE_UNREACHABLE_TTL_MS / 60000)} 分钟内直接改用备用源）`,
@@ -509,12 +545,23 @@ export async function fetchWebPage(
       const html = await res.text();
       throwIfAborted(options.signal);
       const { content, truncated, title } = extractReadableText(html, limit);
+      // 正文过短 = 导航/目录页或纯 JS 页（实测门户首页只有城市名菜单）：
+      // 如实报 parse 失败，不让「导航壳」冒充正文把模型带偏（空正文同路径）
+      if (content.trim().length < MIN_READABLE_CHARS) {
+        return {
+          url: target,
+          title: title === undefined ? '' : truncate(title, MAX_TITLE_CHARS),
+          content: '',
+          truncated: false,
+          error: '未能从页面抽取到正文（正文过短，疑似导航/目录页或需 JS 渲染）',
+          errorKind: 'parse'
+        };
+      }
       return {
         url: target,
         title: title === undefined ? '' : truncate(title, MAX_TITLE_CHARS),
         content,
-        truncated,
-        ...(content.trim() === '' ? { error: '未能从页面抽取到正文', errorKind: 'parse' as const } : {})
+        truncated
       };
     } catch (error) {
       if (options.signal?.aborted) throwIfAborted(options.signal);

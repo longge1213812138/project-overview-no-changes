@@ -11,19 +11,23 @@
  */
 
 /**
- * 可配置的**主**检索引擎（设置页可选）。目前 duckduckgo（HTML 端点，免 API Key）。
+ * 可配置的**主**检索引擎：当前只用 **Bing**（免 Key 的 HTML 端点）。
+ *
+ * 2026-10 本机实测：DuckDuckGo 全域不可达（每次白等 6–12s 才失败），Bing 0.4–0.7s 可达。
+ * 与其"先打不可达的源再降级"，不如一次到位只用可达源——用户体验差别是十几秒。
  */
-export type WebPrimaryEngine = 'duckduckgo';
+export type WebPrimaryEngine = 'bing';
 
 /**
- * 实际执行检索的引擎 = 主引擎 + 内置**备用引擎**。
+ * 实际执行检索的引擎（执行面注册表）。
  *
- * 备用引擎在主引擎**连接类失败**（超时 / 连不上）时自动顶上：「联通性降级」，让
- * 检索源被网络策略挡掉的环境仍能拿到资料（2026-10 实测本机 DDG 全域不可达、
- * Bing 可达，见 core/web/search.ts 的引擎降级逻辑）。
+ * 除主引擎外，`duckduckgo` 的实现（端点 + 解析器 + 单测）保留在注册表里，但**当前策略
+ * 只用主引擎**：内置备用链为空（见 core/web/search.ts 的 FALLBACK_ENGINES）。
+ * 降级机件（连接类失败换源 + 不可达短期记忆 + 降级可见）仍在，可用
+ * `SearchOptions.fallbackEngines` 注入备用源启用（单测与将来新增备用源时用）。
  * 语义失败（HTTP 4xx / 结果页解析不出）**不降级**——换引擎也救不了，只会掩盖真实原因。
  */
-export type WebSearchEngine = WebPrimaryEngine | 'bing';
+export type WebSearchEngine = WebPrimaryEngine | 'duckduckgo';
 
 /** 主引擎失败 → 备用引擎顶上时带回的降级说明（可见，不静默切换） */
 export interface WebEngineFallback {
@@ -64,7 +68,7 @@ export interface WebAccessConfig {
 
 export const DEFAULT_WEB_ACCESS_CONFIG: WebAccessConfig = {
   enabled: true,
-  engine: 'duckduckgo',
+  engine: 'bing',
   maxResults: 5,
   fetchTopN: 2,
   maxPageChars: 6000,
@@ -96,6 +100,14 @@ export interface WebSearchItem {
   title: string;
   url: string;
   snippet: string;
+  /**
+   * 正文摘录（可选，工具路径对**靠前几条**顺带抓一次正文时给出）。
+   *
+   * 为什么要它：门户/资讯站的检索摘要多是首页 SEO 样板（帮不上忙），模型于是反复
+   * web_fetch 猜 URL——而每次 fetch 都要用户审批、都吃掉 Agent 的时长预算。把前几条
+   * 正文随检索一起带回去，模型一次调用就拿到事实，也少几次审批弹窗。
+   */
+  content?: string;
 }
 
 /** 一次检索的完整结果；items 为空不代表失败，需看 error */

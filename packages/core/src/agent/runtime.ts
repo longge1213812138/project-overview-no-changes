@@ -124,19 +124,44 @@ function timedSignal(
   parent: AbortSignal | undefined,
   timeoutMs: number,
   message: string
-): { signal: AbortSignal; dispose: () => void } {
+): { signal: AbortSignal; pause: () => void; resume: () => void; dispose: () => void } {
   const controller = new AbortController();
   const abortFromParent = () => controller.abort(parent?.reason);
   if (parent?.aborted) abortFromParent();
   else parent?.addEventListener('abort', abortFromParent, { once: true });
-  const timer = setTimeout(
-    () => controller.abort(new AgentLimitError(message)),
-    timeoutMs
-  );
+
+  // 可暂停的时长预算：等待用户审批期间不计时（那是人的思考时间，不是 Agent 的耗时）。
+  // 实测（2026-10 日志）：普通对话里一次生成等审批 4 次 × 数秒，足以把 maxDurationMs
+  // 耗尽并报「Agent 执行超过最大时长」——用户看到的是一次失败，而不是「审批慢了」。
+  // parent 的 abort（用户停止）仍立即生效，不受暂停影响。
+  let remaining = timeoutMs;
+  let armedAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+    controller.abort(new AgentLimitError(message));
+  }, timeoutMs);
+
+  const pause = (): void => {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+    remaining = Math.max(0, remaining - (Date.now() - armedAt));
+  };
+  const resume = (): void => {
+    if (timer !== undefined || controller.signal.aborted) return; // 已中止（用户停止/超时）不再续表
+    if (remaining <= 0) {
+      controller.abort(new AgentLimitError(message));
+      return;
+    }
+    armedAt = Date.now();
+    timer = setTimeout(() => controller.abort(new AgentLimitError(message)), remaining);
+  };
+
   return {
     signal: controller.signal,
+    pause,
+    resume,
     dispose: () => {
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
       parent?.removeEventListener('abort', abortFromParent);
     }
   };
@@ -332,9 +357,19 @@ export async function runAgent(
         }
 
         const authorize = options.authorize;
-        const rawDecision: boolean | AgentAuthDecision = authorize
-          ? await raceWithAbort(Promise.resolve().then(() => authorize(tool, input)), run.signal)
-          : false;
+        let rawDecision: boolean | AgentAuthDecision = false;
+        if (authorize) {
+          // 审批等待是人的时间：暂停时长预算，避免「等审批」把 Agent 判成超时
+          run.pause();
+          try {
+            rawDecision = await raceWithAbort(
+              Promise.resolve().then(() => authorize(tool, input)),
+              run.signal
+            );
+          } finally {
+            run.resume();
+          }
+        }
         const decision: AgentAuthDecision =
           typeof rawDecision === 'boolean' ? { approved: rawDecision } : rawDecision;
         if (!decision.approved) {

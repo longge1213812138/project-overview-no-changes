@@ -11,7 +11,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_WEB_ACCESS_CONFIG, resetEngineHealth } from '@fairy/core'
 import type { FairyConfig } from './config'
 import {
+  TOOL_EXCERPT_CHARS,
   buildWebNotice,
+  createWebToolDeps,
   describeWebFailure,
   getWebConfig,
   isWebEnabled,
@@ -33,16 +35,21 @@ vi.mock('./config', () => ({
   }
 }))
 
-const DDG_URL = 'https://html.duckduckgo.com/html/'
+/** 当前唯一检索引擎（Bing）的端点：断言「只打 bing」用它 */
+const BING_URL = 'https://www.bing.com/search'
 
+/** 可读正文占位（≥ MIN_READABLE_CHARS=200）：否则会被「正文过短」守卫按导航页拦下 */
+const LONG_BODY = `<p>${'正文内容'.repeat(60)}</p>`
+
+/** Bing 结果页（结构与 2026-10 实测一致：b_algo → h2>a 直链 + b_caption>p 摘要） */
 function resultHtml(entries: { url: string; title: string; snippet: string }[]): string {
-  return `<html><body>${entries
-    .map(
-      (e) =>
-        `<h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent(e.url)}">${e.title}</a></h2>` +
-        `<a class="result__snippet" href="//duckduckgo.com/l/?uddg=${encodeURIComponent(e.url)}">${e.snippet}</a>`
-    )
-    .join('\n')}</body></html>`
+  const parts = entries.map(
+    (e) =>
+      `<li class="b_algo" data-id iid=SERP.1><h2><a target="_blank" href="${e.url}"><strong>${e.title}</strong></a></h2>` +
+      `<div class="b_caption"><p class="b_lineclamp2">${e.snippet}` +
+      `<a class="b_algoReadMore" href="${e.url}">阅读更多</a></p></div></li>`
+  )
+  return `<html><body><ol id="b_results">${parts.join('')}</ol></body></html>`
 }
 
 /** stub 全局 fetch：按 URL 前缀返回不同内容 */
@@ -111,7 +118,7 @@ describe('saveWebConfig（局部更新 + 落盘往返）', () => {
     const first = saveWebConfig({ enabled: true, maxResults: 4 })
     expect(first.ok).toBe(true)
     expect(first.config?.maxResults).toBe(4)
-    expect(first.config?.engine).toBe('duckduckgo')
+    expect(first.config?.engine).toBe('bing') // 只用 Bing：配置层也归一
 
     const second = saveWebConfig({ fetchTopN: 99 })
     expect(second.config?.fetchTopN).toBe(3) // 夹到硬上限
@@ -138,7 +145,7 @@ describe('runWebRetrieval 编排走向', () => {
 
   it('检索成功 → block 含引用块与规范，sources 编号连续', async () => {
     const net = stubFetch((url) =>
-      url.startsWith(DDG_URL)
+      url.startsWith(BING_URL)
         ? new Response(
             resultHtml([
               { url: 'https://example.com/a', title: '来源一', snippet: '摘要一' },
@@ -146,7 +153,7 @@ describe('runWebRetrieval 编排走向', () => {
             ]),
             { status: 200 }
           )
-        : new Response('<html><head><title>正文标题</title></head><body><p>页面正文内容</p></body></html>', {
+        : new Response(`<html><head><title>正文标题</title></head><body>${LONG_BODY}</body></html>`, {
             status: 200
           })
     )
@@ -178,7 +185,7 @@ describe('runWebRetrieval 编排走向', () => {
 
   it('部分失败：部分来源成功、部分正文抓取失败 → 成功来源仍在，警告进 block', async () => {
     const net = stubFetch((url) => {
-      if (url.startsWith(DDG_URL)) {
+      if (url.startsWith(BING_URL)) {
         return new Response(
           resultHtml([
             { url: 'https://example.com/ok', title: '可用来源', snippet: '摘要' },
@@ -189,7 +196,9 @@ describe('runWebRetrieval 编排走向', () => {
       }
       return url.includes('bad')
         ? new Response('not found', { status: 404 })
-        : new Response('<html><head><title>正文标题</title></head><body><p>正文</p></body></html>', { status: 200 })
+        : new Response(`<html><head><title>正文标题</title></head><body>${LONG_BODY}</body></html>`, {
+            status: 200
+          })
     })
     try {
       const out = await runWebRetrieval('联网查一下最新进展')
@@ -204,7 +213,7 @@ describe('runWebRetrieval 编排走向', () => {
   it('域名黑名单生效：命中来源不进上下文', async () => {
     cfgState.current = { ...cfgState.current, web: { ...DEFAULT_WEB_ACCESS_CONFIG, blockedDomains: ['spam.example'] } }
     const net = stubFetch((url) =>
-      url.startsWith(DDG_URL)
+      url.startsWith(BING_URL)
         ? new Response(
             resultHtml([
               { url: 'https://spam.example/a', title: '黑名单来源', snippet: '不该出现' },
@@ -212,7 +221,7 @@ describe('runWebRetrieval 编排走向', () => {
             ]),
             { status: 200 }
           )
-        : new Response('<html><body><p>正文</p></body></html>', { status: 200 })
+        : new Response(`<html><body>${LONG_BODY}</body></html>`, { status: 200 })
     )
     try {
       const out = await runWebRetrieval('联网查一下资料')
@@ -226,7 +235,9 @@ describe('runWebRetrieval 编排走向', () => {
   it('直达链接模式：抽该类链接为来源（抓不到的走失败块，不伪装成功）', async () => {
     const net = stubFetch((url) =>
       url === 'https://example.com/post'
-        ? new Response('<html><head><title>文章标题</title></head><body><p>文章内容</p></body></html>', { status: 200 })
+        ? new Response(`<html><head><title>文章标题</title></head><body>${LONG_BODY}</body></html>`, {
+            status: 200
+          })
         : new Response('no', { status: 404 })
     )
     try {
@@ -352,9 +363,8 @@ describe('buildWebNotice / describeWebFailure（超时口径）', () => {
 })
 
 describe('runWebRetrieval 超时硬化（部分结果不丢 + 等待有界）', () => {
-  const DDG = 'https://html.duckduckgo.com/html/'
   const page = (title: string): Response =>
-    new Response(`<html><head><title>${title}</title></head><body><p>正文内容</p></body></html>`, {
+    new Response(`<html><head><title>${title}</title></head><body>${LONG_BODY}</body></html>`, {
       status: 200
     })
 
@@ -363,7 +373,7 @@ describe('runWebRetrieval 超时硬化（部分结果不丢 + 等待有界）', 
     const calls: string[] = []
     const net = stubFetchAsync((url, init) => {
       calls.push(url)
-      if (url.startsWith(DDG)) {
+      if (url.startsWith(BING_URL)) {
         return Promise.resolve(
           new Response(
             resultHtml([
@@ -400,7 +410,7 @@ describe('runWebRetrieval 超时硬化（部分结果不丢 + 等待有界）', 
     vi.useFakeTimers()
     let pageCalls = 0
     const net = stubFetchAsync((url, init) => {
-      if (url.startsWith(DDG)) {
+      if (url.startsWith(BING_URL)) {
         return Promise.resolve(
           new Response(
             resultHtml([
@@ -445,86 +455,97 @@ describe('runWebRetrieval 超时硬化（部分结果不丢 + 等待有界）', 
 })
 
 /**
- * 引擎降级编排：主源不可达（实测本机 DDG 全域不可达）→ Bing 顶上把资料取回来。
- * 用户必须看得见「换了源」，且同窗口内不再重复白等主源超时。
+ * **只用 Bing**（生产引擎口径）：一条消息的联网只打 bing，不再"先试 DuckDuckGo 再降级"——
+ * 本机 DDG 全域不可达，那种顺序等于每次白等 6–12s（实测首轮 11.3s），还会挤掉正文摘录。
  */
-describe('runWebRetrieval 引擎降级（主源不可达 → 备用源）', () => {
-  const BING = 'https://www.bing.com/search'
-  const bingResultHtml = (entries: { url: string; title: string; snippet: string }[]): string =>
-    `<html><body><ol id="b_results">${entries
-      .map(
-        (e) =>
-          `<li class="b_algo" data-id iid=SERP.1><h2><a target="_blank" href="${e.url}">${e.title}</a></h2>` +
-          `<div class="b_caption"><p class="b_lineclamp2">${e.snippet}</p></div></li>`
-      )
-      .join('')}</ol></body></html>`
-
-  it('主源超时 → 用备用源结果作答；块头标注降级原因；notice=degraded', async () => {
+describe('runWebRetrieval：只用 Bing（不再先打 DuckDuckGo）', () => {
+  it('检索只请求 bing：块头标注引擎、sources 齐全、零 ddg 请求', async () => {
     cfgState.current = {
       ...cfgState.current,
       web: { ...DEFAULT_WEB_ACCESS_CONFIG, fetchTopN: 0 } // 只看检索链，不抓正文
     }
-    vi.useFakeTimers()
-    const net = stubFetchAsync((url, init) => {
-      if (url.startsWith(DDG_URL)) return hangUntilAbort(init) // 主源不可达（挂到超时）
-      if (url.startsWith(BING)) {
-        return Promise.resolve(
-          new Response(
-            bingResultHtml([
-              { url: 'https://nodejs.org/zh-cn', title: 'Node.js 官网', snippet: 'Node.js 是运行时' }
-            ]),
-            { status: 200 }
-          )
-        )
-      }
-      return Promise.resolve(new Response('unexpected', { status: 500 }))
-    })
-    try {
-      const pending = runWebRetrieval('联网查一下 Node LTS 最新版本')
-      await vi.advanceTimersByTimeAsync(13_000)
-      const out = await pending
-      expect(out?.sources.map((s) => s.url)).toEqual(['https://nodejs.org/zh-cn'])
-      expect(out?.block).toContain('引擎：bing（主引擎 duckduckgo 不可达：')
-      expect(out?.block).toContain('已降级）')
-      expect(out?.notice?.kind).toBe('degraded')
-      expect(out?.notice?.message).toContain('duckduckgo')
-      expect(out?.notice?.message).toContain('bing')
-    } finally {
-      net.restore()
-      vi.useRealTimers()
-    }
-  })
-
-  it('同窗口内再检索：直接走备用源（不再白等主源超时），且不再打扰用户', async () => {
-    cfgState.current = {
-      ...cfgState.current,
-      web: { ...DEFAULT_WEB_ACCESS_CONFIG, fetchTopN: 0 }
-    }
-    vi.useFakeTimers()
     const urls: string[] = []
-    const net = stubFetchAsync((url, init) => {
+    const net = stubFetchAsync((url) => {
       urls.push(url)
-      if (url.startsWith(DDG_URL)) return hangUntilAbort(init)
       return Promise.resolve(
         new Response(
-          bingResultHtml([{ url: 'https://example.com/x', title: '备用源结果', snippet: '摘要' }]),
+          resultHtml([
+            { url: 'https://nodejs.org/zh-cn', title: 'Node.js 官网', snippet: 'Node.js 是运行时' }
+          ]),
           { status: 200 }
         )
       )
     })
     try {
-      const first = runWebRetrieval('联网查一下 Node LTS 最新版本')
-      await vi.advanceTimersByTimeAsync(13_000)
-      expect((await first)?.notice?.kind).toBe('degraded')
-
-      const second = await runWebRetrieval('联网查一下 Rust 最新版本')
-      expect(second?.sources).toHaveLength(1)
-      expect(second?.notice).toBeUndefined() // 降级已是常态：安静运行
-      expect(second?.block).toContain('引擎：bing（主引擎 duckduckgo 不可达：')
-      expect(urls.filter((u) => u.startsWith(DDG_URL))).toHaveLength(1) // 没有第二次白等
+      const out = await runWebRetrieval('联网查一下 Node LTS 最新版本')
+      expect(out?.sources.map((s) => s.url)).toEqual(['https://nodejs.org/zh-cn'])
+      expect(out?.block).toContain('引擎：bing')
+      expect(out?.notice).toBeUndefined() // 正常完成：不打扰用户
+      expect(urls).toHaveLength(1) // 一次就够：没有"先打一个不可达的源"的浪费
+      expect(urls[0]?.startsWith(BING_URL)).toBe(true)
+      expect(urls.some((u) => u.includes('duckduckgo'))).toBe(false)
     } finally {
       net.restore()
-      vi.useRealTimers()
+    }
+  })
+
+  it('bing 不可达 → 如实失败（没有备用源可换，不假装降级）', async () => {
+    cfgState.current = {
+      ...cfgState.current,
+      web: { ...DEFAULT_WEB_ACCESS_CONFIG, fetchTopN: 0 }
+    }
+    const net = stubFetchAsync(() => Promise.reject(new Error('fetch failed')))
+    try {
+      const out = await runWebRetrieval('联网查一下 Node LTS 最新版本')
+      expect(out?.sources).toEqual([])
+      expect(out?.block).toContain('本次尝试联网检索失败')
+      expect(out?.block).not.toContain('已降级')
+      expect(out?.notice?.kind).toBe('failed')
+      expect(out?.notice?.message).toContain('bing')
+    } finally {
+      net.restore()
+    }
+  })
+})
+
+/**
+ * 工具路径（模型主动调 web_search）要顺带带回正文摘录：
+ * 检索摘要多是门户首页 SEO 样板（实测「今天天气怎么样」5 条全是首页简介、零事实），
+ * 模型只能反复 web_fetch 猜 URL——每次都弹审批、都吃 Agent 时长预算。
+ */
+describe('createWebToolDeps：web_search 顺带正文摘录', () => {
+  it('前 2 条附摘录、第 3 条不带；摘录失败不影响检索结果', async () => {
+    cfgState.current = {
+      ...cfgState.current,
+      web: { ...DEFAULT_WEB_ACCESS_CONFIG, maxResults: 3 }
+    }
+    const net = stubFetchAsync((url) => {
+      if (url.startsWith(BING_URL)) {
+        return Promise.resolve(
+          new Response(
+            resultHtml([
+              { url: 'https://example.com/ok1', title: '来源一', snippet: '摘要一' },
+              { url: 'https://example.com/bad', title: '来源二', snippet: '摘要二' },
+              { url: 'https://example.com/ok3', title: '来源三', snippet: '摘要三' }
+            ]),
+            { status: 200 }
+          )
+        )
+      }
+      if (url.includes('/bad')) return Promise.resolve(new Response('nope', { status: 404 }))
+      return Promise.resolve(new Response(`<html><body>${LONG_BODY}</body></html>`, { status: 200 }))
+    })
+    try {
+      const res = await createWebToolDeps().search('Node LTS 最新版本', {})
+      expect(res.items).toHaveLength(3)
+      expect(res.items[0]?.content).toContain('正文内容')
+      expect(res.items[0]?.content?.length).toBeLessThanOrEqual(TOOL_EXCERPT_CHARS)
+      expect(res.items[1]?.content).toBeUndefined() // 抓取失败 → 该条退回纯摘要，不影响其它条
+      expect(res.items[2]?.content).toBeUndefined() // 只摘前 2 条（预算控制）
+      expect(res.error).toBeUndefined()
+      expect(res.items[1]?.snippet).toBe('摘要二')
+    } finally {
+      net.restore()
     }
   })
 })

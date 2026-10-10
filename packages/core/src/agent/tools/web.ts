@@ -21,7 +21,8 @@ const SEARCH_DEFINITION: ChatToolDefinition = {
   function: {
     name: 'web_search',
     description:
-      '联网检索：输入检索词，返回若干条结果（标题/链接/摘要）。仅在用户允许联网时可用；用于获取最新或本地资料库没有的信息',
+      '联网检索：输入检索词，返回若干条结果（标题/链接/摘要；靠前几条还会附页面正文摘录 content，可直接据此作答）。' +
+      '建议先用它拿事实再决定是否 web_fetch：门户首页/目录页往往只是导航壳，抓它们没有信息量',
     parameters: {
       type: 'object',
       properties: {
@@ -38,7 +39,9 @@ const FETCH_DEFINITION: ChatToolDefinition = {
   type: 'function',
   function: {
     name: 'web_fetch',
-    description: '抓取指定 http(s) 页面并抽取正文（内网/本机地址一律拒绝）',
+    description:
+      '抓取指定 http(s) 页面并抽取正文（内网/本机地址一律拒绝）。只返回有实质正文的页面：' +
+      '导航/目录页、纯 JS 页面会以 error 明确告知（这类页面换来源，别反复抓首页）',
     parameters: {
       type: 'object',
       properties: {
@@ -75,7 +78,8 @@ export interface WebFetchInput {
 export interface WebSearchOutput {
   query: string;
   count: number;
-  items: { title: string; url: string; snippet: string }[];
+  /** content = 页面正文摘录（靠前几条才有；见 WebSearchItem.content 的说明） */
+  items: { title: string; url: string; snippet: string; content?: string }[];
   error?: string;
 }
 
@@ -174,7 +178,10 @@ export function createWebTools(deps: WebToolDeps): ToolRegistration[] {
             items: result.items.map((item) => ({
               title: item.title,
               url: item.url,
-              snippet: item.snippet
+              snippet: item.snippet,
+              ...(item.content !== undefined && item.content.trim() !== ''
+                ? { content: item.content }
+                : {})
             })),
             ...(result.error !== undefined ? { error: result.error } : {})
           };

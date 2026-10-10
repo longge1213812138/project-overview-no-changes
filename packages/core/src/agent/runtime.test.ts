@@ -227,6 +227,31 @@ describe('runAgent', () => {
     ).rejects.toBeInstanceOf(AgentLimitError);
   });
 
+  it('等待用户审批的时间不计入 maxDurationMs（审批慢不该判 Agent 超时）', async () => {
+    const { client } = fakeClient([
+      { content: '', toolCalls: [call('call-1')] },
+      { content: 'done' }
+    ]);
+    const execute = vi.fn(makeTool().execute);
+
+    const result = await runAgent(
+      client,
+      [{ role: 'user', content: 'run it' }],
+      [makeTool(execute)],
+      undefined,
+      {
+        maxDurationMs: 60, // Agent 自己的预算只有 60ms
+        authorize: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 150)); // 用户思考 150ms
+          return true;
+        }
+      }
+    );
+
+    expect(result.content).toBe('done');
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it('limits the total assistant output', async () => {
     const { client } = fakeClient([{ content: 'too long' }]);
     await expect(

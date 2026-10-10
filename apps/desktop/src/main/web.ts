@@ -40,6 +40,7 @@ import type {
   WebNotice,
   WebPageContent,
   WebSearchEngine,
+  WebSearchItem,
   WebSearchResult,
   WebSearchTestResult,
   WebSourceRef,
@@ -237,28 +238,96 @@ export async function testWebSearch(query: string): Promise<WebSearchTestResult>
   return { ok: true, engine: result.engine, items: toSources(result.items) }
 }
 
+/** 工具路径给前几条结果附正文摘录（条数 / 每条字符上限） */
+export const TOOL_EXCERPT_TOP_N = 2
+export const TOOL_EXCERPT_CHARS = 1200
+/**
+ * 工具路径**整次调用**的自设预算（ms）：运行时上限是「单次工具执行 15s」，
+ * 这里主动压到 12s——摘录抓不到就算了，绝不让整次工具调用撞上运行时上限
+ * （那会以「工具执行超过最大时长」失败，模型什么也拿不到）。
+ */
+export const TOOL_SEARCH_TOTAL_BUDGET_MS = 12_000
+
+/**
+ * 工具路径**单次尝试**的超时上限（ms）：主源不可达时，默认 12s 的单次超时会把整次
+ * 工具调用的预算吃光（换源、正文摘录都没时间做——实测首轮搜索 11.3s 全花在死主源上）。
+ * 压到 6s：死主源最多让用户等 6s，换源 + 摘录仍有时间，且整次调用不撞 15s 运行时限。
+ */
+export const TOOL_ATTEMPT_TIMEOUT_MS = 6_000
+
+/**
+ * 给靠前结果补正文摘录（并发，尽力而为）。
+ *
+ * 为什么需要：检索摘要多是首页 SEO 样板（实测「今天天气怎么样」返回的 5 条全是
+ * 门户首页简介，零事实），模型只能反复 web_fetch 猜 URL——而每次 fetch 都要用户
+ * 审批、都吃掉 Agent 的时长预算（日志里出现过一次生成 6 次工具调用、最终超时）。
+ * 把前 2 条正文随检索一起带回去，一次调用就能拿到事实。
+ *
+ * 边界：失败/超时/无正文（导航壳）→ 该条不带 content，**不影响检索结果本身**；
+ * 用户停止 → 照常抛出（不自作主张吞掉中止）。
+ */
+async function enrichSearchItems(
+  items: WebSearchItem[],
+  cfg: WebAccessConfig,
+  budgetMs: number,
+  signal?: AbortSignal
+): Promise<WebSearchItem[]> {
+  const perPageBudgetMs = Math.max(1000, Math.min(cfg.timeoutMs, budgetMs - 500))
+  return Promise.all(
+    items.map(async (item, index) => {
+      if (index >= TOOL_EXCERPT_TOP_N) return item
+      try {
+        const page = await fetchWebPage(item.url, cfg, {
+          maxChars: Math.min(cfg.maxPageChars, TOOL_EXCERPT_CHARS),
+          deadlineAt: Date.now() + perPageBudgetMs,
+          retries: 0,
+          ...(signal !== undefined ? { signal } : {})
+        })
+        return page.error !== undefined || page.content.trim() === ''
+          ? item
+          : { ...item, content: page.content }
+      } catch (err) {
+        if (signal?.aborted) throw err
+        return item
+      }
+    })
+  )
+}
+
 /**
  * 内置联网工具（模型在工具循环里调 web_search / web_fetch）的依赖注入。
- * 与预检索共用同一套「总预算 + 快失败重试」策略，避免两条路径的口径漂移
- * （工具路径的额外约束由运行时「单次执行 15s」提供，这里不重复设限）。
+ * 与预检索共用同一套「总预算 + 快失败重试」策略，避免两条路径的口径漂移。
  */
 export function createWebToolDeps(): WebToolDeps {
-  const callOpts = (signal?: AbortSignal): { deadlineAt: number; retries: number; signal?: AbortSignal } => ({
-    deadlineAt: Date.now() + webCallBudgetMs(getWebConfig()),
+  const callOpts = (
+    cfg: WebAccessConfig,
+    signal?: AbortSignal
+  ): { deadlineAt: number; retries: number; signal?: AbortSignal } => ({
+    deadlineAt: Date.now() + webCallBudgetMs(cfg),
     retries: 1,
     ...(signal !== undefined ? { signal } : {})
   })
   return {
-    search: (query, opts) =>
-      searchWeb(query, getWebConfig(), {
-        ...callOpts(opts.signal),
+    search: async (query, opts) => {
+      const cfg = getWebConfig()
+      const startedAt = Date.now()
+      const result = await searchWeb(query, cfg, {
+        ...callOpts(cfg, opts.signal),
+        attemptTimeoutMs: TOOL_ATTEMPT_TIMEOUT_MS,
         ...(opts.maxResults !== undefined ? { maxResults: opts.maxResults } : {})
-      }),
-    fetchPage: (url, opts) =>
-      fetchWebPage(url, getWebConfig(), {
-        ...callOpts(opts.signal),
+      })
+      if (result.items.length === 0) return result
+      const remainingBudgetMs = TOOL_SEARCH_TOTAL_BUDGET_MS - (Date.now() - startedAt)
+      if (remainingBudgetMs < 1500) return result // 检索本身已经花掉大半预算：不再抓摘录
+      return { ...result, items: await enrichSearchItems(result.items, cfg, remainingBudgetMs, opts.signal) }
+    },
+    fetchPage: (url, opts) => {
+      const cfg = getWebConfig()
+      return fetchWebPage(url, cfg, {
+        ...callOpts(cfg, opts.signal),
         ...(opts.maxChars !== undefined ? { maxChars: opts.maxChars } : {})
       })
+    }
   }
 }
 

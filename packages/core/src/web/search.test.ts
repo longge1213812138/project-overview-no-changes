@@ -12,11 +12,27 @@ afterEach(() => {
   resetEngineHealth();
 });
 
-const BASE = 'https://html.duckduckgo.com/html/';
+/** 当前主引擎（Bing）端点基址：只用 Bing，测试据此断言请求地址 */
+const BASE = 'https://www.bing.com/search';
+const DDG_BASE = 'https://html.duckduckgo.com/html/';
 const enc = (url: string): string => encodeURIComponent(url);
 
-/** 构造结果页：每条 = 标题锚点 + 摘要锚点 */
+/**
+ * 构造**当前引擎（Bing）**的结果页（结构与 2026-10 实测一致）：
+ * 每条 = `<li class="b_algo">` → `<h2><a href>` 标题（直链）+ `<div class="b_caption"><p>` 摘要。
+ */
 function resultsHtml(entries: { url: string; title: string; snippet: string }[]): string {
+  const parts = entries.map(
+    (e) =>
+      `<li class="b_algo" data-id iid=SERP.1><h2><a target="_blank" href="${e.url}"><strong>${e.title}</strong></a></h2>` +
+      `<div class="b_caption"><p class="b_lineclamp2">${e.snippet}` +
+      `<a class="b_algoReadMore" href="${e.url}">阅读更多</a></p></div></li>`
+  );
+  return `<html><body><ol id="b_results">${parts.join('')}</ol></body></html>`;
+}
+
+/** DuckDuckGo 结果页（备用引擎的解析入口；仅在注入备用链的用例里用） */
+function ddgResultsHtml(entries: { url: string; title: string; snippet: string }[]): string {
   const parts = entries.map(
     (e) =>
       `<h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=${enc(e.url)}">${e.title}</a></h2>` +
@@ -27,17 +43,6 @@ function resultsHtml(entries: { url: string; title: string; snippet: string }[])
 
 function okFetch(html: string, status = 200): FetchLike {
   return (() => Promise.resolve(new Response(html, { status, headers: { 'content-type': 'text/html' } }))) as FetchLike;
-}
-
-/** Bing 结果页片段（结构与 2026-10 实测一致；备用引擎的解析入口） */
-function bingResultsHtml(entries: { url: string; title: string; snippet: string }[]): string {
-  const parts = entries.map(
-    (e) =>
-      `<li class="b_algo" data-id iid=SERP.1><h2><a target="_blank" href="${e.url}"><strong>${e.title}</strong></a></h2>` +
-      `<div class="b_caption"><p class="b_lineclamp2">${e.snippet}` +
-      `<a class="b_algoReadMore" href="${e.url}">阅读更多</a></p></div></li>`
-  );
-  return `<html><body><ol id="b_results">${parts.join('')}</ol></body></html>`;
 }
 
 /** 记录请求的 fetch 桩：便于断言请求地址与是否带中止信号 */
@@ -82,9 +87,15 @@ describe('normalizeWebAccessConfig（脏配置容错）', () => {
     expect(out.blockedDomains).toEqual([]);
   });
 
-  it('只接受已登记的引擎；脏值回落默认', () => {
-    expect(normalizeWebAccessConfig({ engine: 'bing' }).engine).toBe('duckduckgo');
-    expect(normalizeWebAccessConfig({ engine: 'duckduckgo' }).engine).toBe('duckduckgo');
+  /**
+   * 引擎口径（2026-10 定案）：**只用 Bing**。历史配置里的 'duckduckgo'（本机不可达）
+   * 一律归一为 Bing——不再"先打一个不可达的源再降级"，那等于每条消息白等 6–12s。
+   */
+  it('引擎归一为 Bing：旧配置的 duckduckgo/脏值都不生效', () => {
+    expect(normalizeWebAccessConfig({ engine: 'bing' }).engine).toBe('bing');
+    expect(normalizeWebAccessConfig({ engine: 'duckduckgo' }).engine).toBe('bing');
+    expect(normalizeWebAccessConfig({ engine: 'whatever' as never }).engine).toBe('bing');
+    expect(normalizeWebAccessConfig(undefined).engine).toBe('bing');
   });
 });
 
@@ -208,13 +219,24 @@ describe('searchWeb 失败可见（不抛、不伪装成功）', () => {
 
 describe('fetchWebPage', () => {
   it('抓取成功：抽出标题与正文，脚本/样式不进正文', async () => {
-    const html = '<html><head><title>标题A</title><style>a{color:red}</style></head><body><script>x</script><p>正文A</p></body></html>';
+    const html =
+      '<html><head><title>标题A</title><style>a{color:red}</style></head><body><script>x</script>' +
+      `<p>${'正文A'.repeat(100)}</p></body></html>`;
     const res = await fetchWebPage('https://example.com/p', cfg(), { fetchImpl: okFetch(html) });
     expect(res.error).toBeUndefined();
     expect(res.title).toBe('标题A');
     expect(res.content).toContain('正文A');
     expect(res.content).not.toContain('color:red');
     expect(res.truncated).toBe(false);
+  });
+
+  it('正文过短（导航/目录页）→ parse 失败，不拿导航壳冒充正文', async () => {
+    // 实测形态：中国天气网的省份目录页只有百余字城市名菜单
+    const nav = '<html><head><title>天气网</title></head><body><p>预警 信息 地图 卫星 全国 北京 上海 广东 广西</p></body></html>';
+    const res = await fetchWebPage('https://example.com/nav', cfg(), { fetchImpl: okFetch(nav) });
+    expect(res.errorKind).toBe('parse');
+    expect(res.error).toContain('正文过短');
+    expect(res.content).toBe('');
   });
 
   it('URL 未过守卫 → 不发请求，返回可见错误', async () => {
@@ -293,7 +315,7 @@ describe('searchWeb 超时与重试', () => {
     expect(res.error).toBeUndefined();
   });
 
-  it('慢失败（耗时接近单请求超时）不重试，但按降级链换源', async () => {
+  it('慢失败（耗时接近单请求超时）不重试，但按备用链换源', async () => {
     vi.useFakeTimers();
     try {
       let primaryCalls = 0;
@@ -304,19 +326,54 @@ describe('searchWeb 超时与重试', () => {
             setTimeout(() => reject(new Error('ECONNRESET')), 1600);
           });
         }
-        // 备用源正常（本用例只关心「主源慢失败不重试」）
+        // 备用源（注入的 duckduckgo）正常：本用例只关心「主源慢失败不重试」
         return Promise.resolve(
-          new Response(bingResultsHtml([{ url: 'https://example.com/b', title: '备用源', snippet: '摘要' }]), {
+          new Response(ddgResultsHtml([{ url: 'https://example.com/b', title: '备用源', snippet: '摘要' }]), {
             status: 200
           })
         );
       }) as FetchLike;
-      const pending = searchWeb('t', cfg(), { fetchImpl: slowFail, retries: 1 });
+      const pending = searchWeb('t', cfg(), {
+        fetchImpl: slowFail,
+        retries: 1,
+        fallbackEngines: ['duckduckgo'] // 默认链为空（只用 Bing）：这里显式注入以覆盖降级机件
+      });
       await vi.advanceTimersByTimeAsync(2500);
       const res = await pending;
       expect(primaryCalls).toBe(1); // 1.6s > RETRY_FAST_FAILURE_MS：不重试
-      expect(res.engine).toBe('bing');
+      expect(res.engine).toBe('duckduckgo');
+      expect(res.fallback?.from).toBe('bing');
       expect(res.fallback?.observedNow).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('attemptTimeoutMs 压短单次尝试（工具路径：别让死主源吃光整次调用预算）', async () => {
+    vi.useFakeTimers();
+    try {
+      const stamps: number[] = [];
+      const hang = ((_input: string, init?: RequestInit) => {
+        stamps.push(Date.now()); // 请求开始
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            stamps.push(Date.now()); // 被中止
+            reject(init.signal?.reason);
+          });
+        });
+      }) as FetchLike;
+
+      const pending = searchWeb('t', cfg({ timeoutMs: 12_000 }), {
+        fetchImpl: hang,
+        retries: 0,
+        attemptTimeoutMs: 3000
+      });
+      await vi.advanceTimersByTimeAsync(6600); // 主源 3s + 备用源 3s
+      const res = await pending;
+
+      // 单次尝试被压到 3s（而非 cfg 的 12s）——这正是「换源 + 摘录还有时间」的前提
+      expect(stamps[1]! - stamps[0]!).toBe(3000);
+      expect(res.errorKind).toBe('timeout');
     } finally {
       vi.useRealTimers();
     }
@@ -397,23 +454,23 @@ describe('searchWeb 超时与重试', () => {
 });
 
 /**
- * 阶段 10：引擎降级（主源被网络策略挡掉时改用内置备用源 bing）。
- * 钉死三条口径：只在连接类失败时降级、降级可见（fallback）、短期记忆避免每条消息白等。
+ * 阶段 10 降级机件（**当前生产路径不启用**：默认链为空，只用 Bing）。
+ * 这里用 `fallbackEngines` 注入备用源（duckduckgo）钉死机件本身的三条口径：
+ * 只在连接类失败时降级、降级可见（fallback）、短期记忆避免每次白等。
  */
-describe('searchWeb 引擎降级', () => {
-  const BING = 'https://www.bing.com/search';
-
+describe('searchWeb 引擎降级机件（注入备用链）', () => {
   /** 挂住直到被中止（模拟主源不可达） */
   const hangUntilAbort = (init?: RequestInit): Promise<Response> =>
     new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
     });
 
-  /** Bing 结果页片段（结构与实测一致） */
-  const bingHtml = (title: string): string =>
-    bingResultsHtml([{ url: 'https://example.com/b', title, snippet: '摘要文本' }]);
+  /** 生产形态不用备用链：机件用例显式注入 */
+  const chain = { fallbackEngines: ['duckduckgo'] as const };
+  const ddgHtml = (title: string): string =>
+    ddgResultsHtml([{ url: 'https://example.com/b', title, snippet: '摘要文本' }]);
 
-  it('主引擎超时 → 自动改用 bing 并带回降级说明（observedNow=true）', async () => {
+  it('主引擎（Bing）超时 → 备用源顶上并带回降级说明（observedNow=true）', async () => {
     vi.useFakeTimers();
     try {
       const urls: string[] = [];
@@ -421,19 +478,23 @@ describe('searchWeb 引擎降级', () => {
         urls.push(input);
         return input.startsWith(BASE)
           ? hangUntilAbort(init)
-          : Promise.resolve(new Response(bingHtml('备用源结果'), { status: 200 }));
+          : Promise.resolve(new Response(ddgHtml('备用源结果'), { status: 200 }));
       }) as FetchLike;
 
-      const pending = searchWeb('t', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0 });
+      const pending = searchWeb('t', cfg({ timeoutMs: 3000 }), {
+        fetchImpl,
+        retries: 0,
+        ...chain
+      });
       await vi.advanceTimersByTimeAsync(3500);
       const res = await pending;
 
       expect(urls[0]?.startsWith(BASE)).toBe(true);
-      expect(urls[1]?.startsWith(BING)).toBe(true);
-      expect(res.engine).toBe('bing');
+      expect(urls[1]?.startsWith(DDG_BASE)).toBe(true);
+      expect(res.engine).toBe('duckduckgo');
       expect(res.items[0]?.title).toBe('备用源结果');
       expect(res.fallback).toEqual({
-        from: 'duckduckgo',
+        from: 'bing',
         reason: '检索失败：检索请求超时',
         observedNow: true
       });
@@ -449,9 +510,9 @@ describe('searchWeb 引擎降级', () => {
       return Promise.resolve(new Response('nope', { status: 404 }));
     }) as FetchLike;
 
-    const res = await searchWeb('t', cfg(), { fetchImpl, retries: 0 });
+    const res = await searchWeb('t', cfg(), { fetchImpl, retries: 0, ...chain });
     expect(urls).toHaveLength(1);
-    expect(res.engine).toBe('duckduckgo');
+    expect(res.engine).toBe('bing');
     expect(res.errorKind).toBe('http');
     expect(res.fallback).toBeUndefined();
   });
@@ -464,15 +525,15 @@ describe('searchWeb 引擎降级', () => {
         urls.push(input);
         return input.startsWith(BASE)
           ? hangUntilAbort(init)
-          : Promise.resolve(new Response(bingHtml('备用源结果'), { status: 200 }));
+          : Promise.resolve(new Response(ddgHtml('备用源结果'), { status: 200 }));
       }) as FetchLike;
 
-      const first = searchWeb('t1', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0 });
+      const first = searchWeb('t1', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0, ...chain });
       await vi.advanceTimersByTimeAsync(3500);
       expect((await first).fallback?.observedNow).toBe(true);
 
-      const second = await searchWeb('t2', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0 });
-      expect(second.engine).toBe('bing');
+      const second = await searchWeb('t2', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0, ...chain });
+      expect(second.engine).toBe('duckduckgo');
       expect(second.fallback?.observedNow).toBe(false); // 已是常态：安静运行
       expect(urls.filter((u) => u.startsWith(BASE))).toHaveLength(1); // 没有再白等主源一次
     } finally {
@@ -482,14 +543,79 @@ describe('searchWeb 引擎降级', () => {
 
   it('全引擎失败 → 清空可达性记忆（下一条消息从头重试，网络恢复能自愈）', async () => {
     const failing = (() => Promise.reject(new Error('fetch failed'))) as FetchLike;
-    const first = await searchWeb('t', cfg(), { fetchImpl: failing, retries: 0 });
+    const first = await searchWeb('t', cfg(), { fetchImpl: failing, retries: 0, ...chain });
     expect(first.errorKind).toBe('network');
 
     const recovered = await searchWeb('t2', cfg(), {
       fetchImpl: okFetch(resultsHtml([{ url: 'https://example.com/a', title: '恢复后来源', snippet: '摘要' }])),
-      retries: 0
+      retries: 0,
+      ...chain
     });
-    expect(recovered.engine).toBe('duckduckgo');
+    expect(recovered.engine).toBe('bing');
     expect(recovered.items[0]?.title).toBe('恢复后来源');
+  });
+
+  /**
+   * 空链守卫：唯一引擎被「不可达记忆」跳过时仍要实打实试一次，
+   * 否则「主源刚失败过一次」会变成「未执行任何尝试」这种假失败；且不得虚报降级。
+   */
+  it('备用链为空 + 主源被判不可达 → 仍尝试主源，且不虚报降级', async () => {
+    const urls: string[] = [];
+    const stub = ((input: string, init?: RequestInit) => {
+      urls.push(input);
+      return input.startsWith(BASE)
+        ? hangUntilAbort(init)
+        : Promise.resolve(new Response(ddgHtml('备用源结果'), { status: 200 }));
+    }) as FetchLike;
+
+    // 第一次：注入链 → bing 超时被记为不可达，备用源顶上（记忆保留）
+    vi.useFakeTimers();
+    try {
+      const first = searchWeb('t1', cfg({ timeoutMs: 3000 }), { fetchImpl: stub, retries: 0, ...chain });
+      await vi.advanceTimersByTimeAsync(3500);
+      expect((await first).fallback?.observedNow).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // 第二次：链为空（生产形态）→ 唯一引擎照常尝试，且不该声称「已降级」
+    const urls2: string[] = [];
+    const onlyBing = ((input: string) => {
+      urls2.push(input);
+      return Promise.resolve(
+        new Response(resultsHtml([{ url: 'https://example.com/a', title: '照常取回', snippet: '摘要' }]), {
+          status: 200
+        })
+      );
+    }) as FetchLike;
+    const res = await searchWeb('t2', cfg(), { fetchImpl: onlyBing, retries: 0 });
+
+    expect(urls2[0]?.startsWith(BASE)).toBe(true);
+    expect(res.engine).toBe('bing');
+    expect(res.items[0]?.title).toBe('照常取回');
+    expect(res.fallback).toBeUndefined(); // 没换源就不许说换过
+  });
+});
+
+/** 只用 Bing：默认（不注入备用链）时绝不请求其它检索引擎。 */
+describe('只用 Bing（默认引擎口径）', () => {
+  it('检索只打 bing，完全不请求 DuckDuckGo', async () => {
+    const rec = recordingFetch(resultsHtml([{ url: 'https://example.com/a', title: '来源', snippet: '摘要' }]));
+    const res = await searchWeb('Node LTS 最新版本', cfg(), { fetchImpl: rec.fetchImpl, retries: 0 });
+
+    expect(res.engine).toBe('bing');
+    expect(res.items).toHaveLength(1);
+    expect(rec.urls).toHaveLength(1); // 一次就够：没有「先打一个不可达的源」的浪费
+    expect(rec.urls[0]?.startsWith(BASE)).toBe(true);
+    expect(rec.urls.some((u) => u.includes('duckduckgo'))).toBe(false);
+  });
+
+  it('主源不可达时如实失败（无备用源可换，不假装换过）', async () => {
+    const boom: FetchLike = (() => Promise.reject(new Error('fetch failed'))) as FetchLike;
+    const res = await searchWeb('t', cfg(), { fetchImpl: boom, retries: 0 });
+    expect(res.engine).toBe('bing');
+    expect(res.errorKind).toBe('network');
+    expect(res.items).toEqual([]);
+    expect(res.fallback).toBeUndefined();
   });
 });
