@@ -4,7 +4,7 @@
  *
  * 本文件只做协议映射（纯函数，可单测）；重试/超时/错误分类/SSE 行读取共用 client.ts：
  * - 请求：ChatMessage[] → `input` 项数组（tool 消息 → function_call_output、
- *   assistant 带工具调用 → assistant 文本 + function_call 项）；
+ *   assistant 带工具调用 → assistant 文本 + function_call 项，项 id 合成 `fc_<call_id>`）；
  *   ChatToolDefinition[] → 扁平 `{type:'function', name, …}`（Responses 无嵌套 function）；
  *   `maxTokens` → `max_output_tokens`；tool_choice 取值 auto/none/required 相同。
  * - 响应（非流式）：`output[]` → content/reasoning/toolCalls/finishReason；
@@ -25,6 +25,17 @@ import type {
 } from './types';
 
 // ===== 请求映射 =====
+
+/**
+ * function_call 项 id：`fc_` 前缀 + 服务端给的 call_id。
+ * 严格端点（AgnesAI /v1/responses，2026-10 实测）要求 `input` 里 function_call 项带
+ * **以 `fc_` 开头的 id**，否则报
+ * 「input: data did not match any variant of untagged enum ResponseInput」400 —— 联网
+ * 触发工具循环的第二轮就死在这里。id 只做项标识，不必等于服务端原本的项 id。
+ */
+export function toFunctionCallItemId(callId: string): string {
+  return `fc_${callId}`;
+}
 
 /** ChatMessage[] → Responses `input` 数组（顺序保持；工具结果/调用转 item 形态） */
 export function toResponsesInput(messages: ChatMessage[]): unknown[] {
@@ -47,6 +58,11 @@ export function toResponsesInput(messages: ChatMessage[]): unknown[] {
       for (const call of message.toolCalls ?? []) {
         input.push({
           type: 'function_call',
+          // 项 id：多数实现把它当可选，但严格要求 item_id 前缀的端点（如 AgnesAI，
+          // 实测缺 id / 非 `fc_` 前缀 → 整个 input 反序列化失败 400）必须给。
+          // 我方模型只持有服务端下发的 call_id，故按它合成一个确定性 `fc_` id：
+          // 同一个 call 每次重发得到同一个项 id（无随机性、可回归）。
+          id: toFunctionCallItemId(call.id),
           call_id: call.id,
           name: call.function.name,
           arguments: call.function.arguments

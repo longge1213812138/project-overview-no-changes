@@ -121,3 +121,29 @@ describe('urlDedupeKey / urlHost / domainMatches', () => {
     expect(domainMatches('notexample.com', 'example.com')).toBe(false);
   });
 });
+
+/** Bing 跳转包装（备用引擎的部分变体）：/ck/a?…u=a1<base64url> → 真实目标 */
+describe('normalizeResultUrl：Bing 跳转包装解包', () => {
+  it('bing.com 的 /ck/a + u=a1<base64url> → 解出真实 URL', () => {
+    const target = 'https://nodejs.org/zh-cn?x=1&y=2';
+    const wrapped = Buffer.from(target, 'utf8').toString('base64url');
+    const href = `https://www.bing.com/ck/a?!&&p=abc&u=a1${wrapped}&ntb=1`;
+    expect(normalizeResultUrl(href, 'https://www.bing.com/search')).toBe(target);
+  });
+
+  it('非 bing 域 / 非 /ck/a 路径不当作包装（防误解）', () => {
+    const fake = 'https://evil.example/ck/a?u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS8';
+    expect(normalizeResultUrl(fake, 'https://base.example/')).toBe(fake);
+    const notCk = 'https://www.bing.com/search?u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS8';
+    expect(normalizeResultUrl(notCk, 'https://base.example/')).toBe(notCk);
+  });
+
+  it('Bing 直链（实测主形态）与相对路径照常归一', () => {
+    expect(normalizeResultUrl('https://nodejs.org/zh-cn', 'https://www.bing.com/search')).toBe(
+      'https://nodejs.org/zh-cn'
+    );
+    expect(normalizeResultUrl('/docs/a', 'https://www.bing.com/search')).toBe(
+      'https://www.bing.com/docs/a'
+    );
+  });
+});

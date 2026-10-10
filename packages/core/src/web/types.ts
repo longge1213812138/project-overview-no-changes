@@ -10,15 +10,41 @@
  * 绝不进 `index.web.ts`（renderer 面）— 由 agent/entry-isolation.test.ts 钉死。
  */
 
-/** 可用检索引擎。目前内置 duckduckgo（HTML 端点，**免 API Key**、可实现「开箱即联网」） */
-export type WebSearchEngine = 'duckduckgo';
+/**
+ * 可配置的**主**检索引擎（设置页可选）。目前 duckduckgo（HTML 端点，免 API Key）。
+ */
+export type WebPrimaryEngine = 'duckduckgo';
+
+/**
+ * 实际执行检索的引擎 = 主引擎 + 内置**备用引擎**。
+ *
+ * 备用引擎在主引擎**连接类失败**（超时 / 连不上）时自动顶上：「联通性降级」，让
+ * 检索源被网络策略挡掉的环境仍能拿到资料（2026-10 实测本机 DDG 全域不可达、
+ * Bing 可达，见 core/web/search.ts 的引擎降级逻辑）。
+ * 语义失败（HTTP 4xx / 结果页解析不出）**不降级**——换引擎也救不了，只会掩盖真实原因。
+ */
+export type WebSearchEngine = WebPrimaryEngine | 'bing';
+
+/** 主引擎失败 → 备用引擎顶上时带回的降级说明（可见，不静默切换） */
+export interface WebEngineFallback {
+  /** 失败的那个引擎 */
+  from: WebSearchEngine;
+  /** 它为什么失败（人类可读，进日志 / 上下文块 / 用户提示条） */
+  reason: string;
+  /**
+   * 本轮是否**亲自观察到**主引擎失败。
+   * false = 命中「主引擎不可达」短期记忆（ENGINE_UNREACHABLE_TTL_MS）直接走备用：
+   * 此时只在上下文块里标注引擎，不再打扰用户（降级已是当前常态）。
+   */
+  observedNow: boolean;
+}
 
 /** 联网能力与用法口径（ApI 通道；已取得用户显式开启） */
 export interface WebAccessConfig {
   /** 总开关：false = 任何情况都不外发请求（默认 true，尊重「默认可用」但每次可见） */
   enabled: boolean;
-  /** 检索引擎（默认 duckduckgo） */
-  engine: WebSearchEngine;
+  /** 主检索引擎（默认 duckduckgo；不可达时自动降级到备用引擎） */
+  engine: WebPrimaryEngine;
   /** 单次检索最多返回几条结果（1-10，默认 5） */
   maxResults: number;
   /** 检索后自动抓取正文的条数（0-3，默认 2；0 = 只用摘要） */
@@ -47,6 +73,24 @@ export const DEFAULT_WEB_ACCESS_CONFIG: WebAccessConfig = {
   blockedDomains: []
 };
 
+/**
+ * 失败归类（阶段 10 超时硬化）：把「超时 / 连不上 / 被拒 / 解析不了 / 被守卫拦」分开，
+ * 上层据此决定 ① 能否重试 ② 向用户怎么交代（超时 ≠ 源不可达 ≠ 被风控）。
+ */
+export type WebErrorKind =
+  /** 单请求超时或总预算耗尽（网络慢或源不可达的典型表现） */
+  | 'timeout'
+  /** 连接层失败（DNS/代理/连接重置/TLS 失败） */
+  | 'network'
+  /** 源返回非 2xx */
+  | 'http'
+  /** 拿到了页面但解析不出条目/正文（引擎改版或缺正文） */
+  | 'parse'
+  /** 未通过 URL 安全守卫（不发请求） */
+  | 'blocked'
+  /** 可检索内容为空（空检索词等） */
+  | 'empty';
+
 /** 检索结果的单条摘要（未经 MainText 抓取） */
 export interface WebSearchItem {
   title: string;
@@ -57,10 +101,15 @@ export interface WebSearchItem {
 /** 一次检索的完整结果；items 为空不代表失败，需看 error */
 export interface WebSearchResult {
   query: string;
+  /** **实际给出结果**的引擎（降级时不是配置里的主引擎） */
   engine: WebSearchEngine;
   items: WebSearchItem[];
   /** 失败原因（超时/网络/解析失败等）；成功且无结果为 undefined */
   error?: string;
+  /** 失败归类（error 存在时给出，供重试判定与用户提示措辞） */
+  errorKind?: WebErrorKind;
+  /** 主引擎不可达、由备用引擎顶替时给出（降级必须可见） */
+  fallback?: WebEngineFallback;
 }
 
 /** 抓取并抽取正文后的页面内容 */
@@ -76,6 +125,8 @@ export interface WebPageContent {
 /** 抓取结果（失败时 content 为空串并带 error） */
 export interface WebFetchResult extends WebPageContent {
   error?: string;
+  /** 失败归类（同 WebSearchResult；'parse' = 页面拿到了但抽不出正文） */
+  errorKind?: WebErrorKind;
 }
 
 /** 进入上下文的引用条目（带编号，模型用 [编号] 标注来源） */

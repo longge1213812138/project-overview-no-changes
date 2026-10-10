@@ -2,10 +2,15 @@
  * 阶段 10：检索/抓取执行器单测（fake fetch，不触真实网络）。
  * 重点验证「四道筛选」与「失败可见」两条不变量。
  */
-import { describe, expect, it } from 'vitest';
-import { fetchWebPage, normalizeWebAccessConfig, searchWeb } from './search';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchWebPage, normalizeWebAccessConfig, resetEngineHealth, searchWeb } from './search';
 import type { FetchLike, WebAccessConfig } from './types';
 import { DEFAULT_WEB_ACCESS_CONFIG } from './types';
+
+/** 引擎可达性记忆是模块级状态：用例之间必须清掉，否则「不可达」会串到下一个用例 */
+afterEach(() => {
+  resetEngineHealth();
+});
 
 const BASE = 'https://html.duckduckgo.com/html/';
 const enc = (url: string): string => encodeURIComponent(url);
@@ -22,6 +27,17 @@ function resultsHtml(entries: { url: string; title: string; snippet: string }[])
 
 function okFetch(html: string, status = 200): FetchLike {
   return (() => Promise.resolve(new Response(html, { status, headers: { 'content-type': 'text/html' } }))) as FetchLike;
+}
+
+/** Bing 结果页片段（结构与 2026-10 实测一致；备用引擎的解析入口） */
+function bingResultsHtml(entries: { url: string; title: string; snippet: string }[]): string {
+  const parts = entries.map(
+    (e) =>
+      `<li class="b_algo" data-id iid=SERP.1><h2><a target="_blank" href="${e.url}"><strong>${e.title}</strong></a></h2>` +
+      `<div class="b_caption"><p class="b_lineclamp2">${e.snippet}` +
+      `<a class="b_algoReadMore" href="${e.url}">阅读更多</a></p></div></li>`
+  );
+  return `<html><body><ol id="b_results">${parts.join('')}</ol></body></html>`;
 }
 
 /** 记录请求的 fetch 桩：便于断言请求地址与是否带中止信号 */
@@ -231,5 +247,249 @@ describe('fetchWebPage', () => {
     await expect(
       fetchWebPage('https://example.com/a', cfg(), { fetchImpl: okFetch('x'), signal: controller.signal })
     ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+/**
+ * 阶段 10 硬化：超时归类 / 有界重试 / 总预算（deadlineAt）。
+ * 这些用例钉死「用户等待有界 + 失败可归类 + 不把等待翻倍」三条口径。
+ */
+describe('searchWeb 超时与重试', () => {
+  /** 挂住直到被中止的 fetch 桩：模拟「源不可达」（连接建立后不返回） */
+  const hangingFetch: FetchLike = ((_input: string, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    })) as FetchLike;
+
+  it('单请求超时 → errorKind=timeout（不抛，交给上层提示）', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = searchWeb('t', cfg({ timeoutMs: 3000 }), { fetchImpl: hangingFetch });
+      // 主源超时后会按降级链再试备用源（本桩对所有地址都挂住）→ 等两轮
+      await vi.advanceTimersByTimeAsync(6500);
+      const res = await pending;
+      expect(res.items).toEqual([]);
+      expect(res.errorKind).toBe('timeout');
+      expect(res.error).toContain('超时');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('快失败（立即拒绝）→ 自动重试一次并成功', async () => {
+    let calls = 0;
+    const flaky: FetchLike = (() => {
+      calls += 1;
+      if (calls === 1) return Promise.reject(new Error('ECONNRESET'));
+      return Promise.resolve(
+        new Response(resultsHtml([{ url: 'https://example.com/a', title: '标题', snippet: '摘要' }]), {
+          status: 200
+        })
+      );
+    }) as FetchLike;
+    const res = await searchWeb('t', cfg(), { fetchImpl: flaky, retries: 1 });
+    expect(calls).toBe(2);
+    expect(res.items).toHaveLength(1);
+    expect(res.error).toBeUndefined();
+  });
+
+  it('慢失败（耗时接近单请求超时）不重试，但按降级链换源', async () => {
+    vi.useFakeTimers();
+    try {
+      let primaryCalls = 0;
+      const slowFail: FetchLike = ((input: string) => {
+        if (input.startsWith(BASE)) {
+          primaryCalls += 1;
+          return new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('ECONNRESET')), 1600);
+          });
+        }
+        // 备用源正常（本用例只关心「主源慢失败不重试」）
+        return Promise.resolve(
+          new Response(bingResultsHtml([{ url: 'https://example.com/b', title: '备用源', snippet: '摘要' }]), {
+            status: 200
+          })
+        );
+      }) as FetchLike;
+      const pending = searchWeb('t', cfg(), { fetchImpl: slowFail, retries: 1 });
+      await vi.advanceTimersByTimeAsync(2500);
+      const res = await pending;
+      expect(primaryCalls).toBe(1); // 1.6s > RETRY_FAST_FAILURE_MS：不重试
+      expect(res.engine).toBe('bing');
+      expect(res.fallback?.observedNow).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('deadlineAt 把单请求超时夹到剩余预算内，且预算已尽不再重试', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const counted: FetchLike = ((_input: string, init?: RequestInit) => {
+        calls += 1;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        });
+      }) as FetchLike;
+      const pending = searchWeb('t', cfg({ timeoutMs: 12_000 }), {
+        fetchImpl: counted,
+        retries: 1,
+        deadlineAt: Date.now() + 300
+      });
+      await vi.advanceTimersByTimeAsync(300);
+      const res = await pending;
+      expect(calls).toBe(1);
+      expect(res.errorKind).toBe('timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('4xx → errorKind=http 且不重试；5xx 快失败 → 重试一次', async () => {
+    let calls = 0;
+    const rejected: FetchLike = (() => {
+      calls += 1;
+      return Promise.resolve(new Response('nope', { status: 404 }));
+    }) as FetchLike;
+    const res = await searchWeb('t', cfg(), { fetchImpl: rejected, retries: 1 });
+    expect(calls).toBe(1);
+    expect(res.errorKind).toBe('http');
+    expect(res.error).toContain('404');
+
+    let calls2 = 0;
+    const flaky5xx: FetchLike = (() => {
+      calls2 += 1;
+      if (calls2 === 1) return Promise.resolve(new Response('boom', { status: 502 }));
+      return Promise.resolve(
+        new Response(resultsHtml([{ url: 'https://example.com/a', title: '标题', snippet: '摘要' }]), {
+          status: 200
+        })
+      );
+    }) as FetchLike;
+    const ok = await searchWeb('t', cfg(), { fetchImpl: flaky5xx, retries: 1 });
+    expect(calls2).toBe(2);
+    expect(ok.items).toHaveLength(1);
+  });
+
+  it('失败归类：解析不出条目 → parse；URL 守卫拒绝 → blocked', async () => {
+    const parse = await searchWeb('t', cfg(), { fetchImpl: okFetch('<html>风控页面</html>') });
+    expect(parse.errorKind).toBe('parse');
+
+    const blocked = await fetchWebPage('http://127.0.0.1/x', cfg(), { fetchImpl: okFetch('') });
+    expect(blocked.errorKind).toBe('blocked');
+  });
+
+  it('页面抓取超时的文案与检索区分（抓取请求超时）', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = fetchWebPage('https://example.com/a', cfg({ timeoutMs: 3000 }), {
+        fetchImpl: hangingFetch
+      });
+      await vi.advanceTimersByTimeAsync(3100);
+      const res = await pending;
+      expect(res.errorKind).toBe('timeout');
+      expect(res.error).toContain('抓取');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * 阶段 10：引擎降级（主源被网络策略挡掉时改用内置备用源 bing）。
+ * 钉死三条口径：只在连接类失败时降级、降级可见（fallback）、短期记忆避免每条消息白等。
+ */
+describe('searchWeb 引擎降级', () => {
+  const BING = 'https://www.bing.com/search';
+
+  /** 挂住直到被中止（模拟主源不可达） */
+  const hangUntilAbort = (init?: RequestInit): Promise<Response> =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    });
+
+  /** Bing 结果页片段（结构与实测一致） */
+  const bingHtml = (title: string): string =>
+    bingResultsHtml([{ url: 'https://example.com/b', title, snippet: '摘要文本' }]);
+
+  it('主引擎超时 → 自动改用 bing 并带回降级说明（observedNow=true）', async () => {
+    vi.useFakeTimers();
+    try {
+      const urls: string[] = [];
+      const fetchImpl = ((input: string, init?: RequestInit) => {
+        urls.push(input);
+        return input.startsWith(BASE)
+          ? hangUntilAbort(init)
+          : Promise.resolve(new Response(bingHtml('备用源结果'), { status: 200 }));
+      }) as FetchLike;
+
+      const pending = searchWeb('t', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0 });
+      await vi.advanceTimersByTimeAsync(3500);
+      const res = await pending;
+
+      expect(urls[0]?.startsWith(BASE)).toBe(true);
+      expect(urls[1]?.startsWith(BING)).toBe(true);
+      expect(res.engine).toBe('bing');
+      expect(res.items[0]?.title).toBe('备用源结果');
+      expect(res.fallback).toEqual({
+        from: 'duckduckgo',
+        reason: '检索失败：检索请求超时',
+        observedNow: true
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('语义失败（HTTP 4xx）不降级：换源救不了，如实报错', async () => {
+    const urls: string[] = [];
+    const fetchImpl = ((input: string) => {
+      urls.push(input);
+      return Promise.resolve(new Response('nope', { status: 404 }));
+    }) as FetchLike;
+
+    const res = await searchWeb('t', cfg(), { fetchImpl, retries: 0 });
+    expect(urls).toHaveLength(1);
+    expect(res.engine).toBe('duckduckgo');
+    expect(res.errorKind).toBe('http');
+    expect(res.fallback).toBeUndefined();
+  });
+
+  it('短期记忆：主源不可达后，下一条检索直接走备用源且不再提示降级', async () => {
+    vi.useFakeTimers();
+    try {
+      const urls: string[] = [];
+      const fetchImpl = ((input: string, init?: RequestInit) => {
+        urls.push(input);
+        return input.startsWith(BASE)
+          ? hangUntilAbort(init)
+          : Promise.resolve(new Response(bingHtml('备用源结果'), { status: 200 }));
+      }) as FetchLike;
+
+      const first = searchWeb('t1', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0 });
+      await vi.advanceTimersByTimeAsync(3500);
+      expect((await first).fallback?.observedNow).toBe(true);
+
+      const second = await searchWeb('t2', cfg({ timeoutMs: 3000 }), { fetchImpl, retries: 0 });
+      expect(second.engine).toBe('bing');
+      expect(second.fallback?.observedNow).toBe(false); // 已是常态：安静运行
+      expect(urls.filter((u) => u.startsWith(BASE))).toHaveLength(1); // 没有再白等主源一次
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('全引擎失败 → 清空可达性记忆（下一条消息从头重试，网络恢复能自愈）', async () => {
+    const failing = (() => Promise.reject(new Error('fetch failed'))) as FetchLike;
+    const first = await searchWeb('t', cfg(), { fetchImpl: failing, retries: 0 });
+    expect(first.errorKind).toBe('network');
+
+    const recovered = await searchWeb('t2', cfg(), {
+      fetchImpl: okFetch(resultsHtml([{ url: 'https://example.com/a', title: '恢复后来源', snippet: '摘要' }])),
+      retries: 0
+    });
+    expect(recovered.engine).toBe('duckduckgo');
+    expect(recovered.items[0]?.title).toBe('恢复后来源');
   });
 });

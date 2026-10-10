@@ -10,6 +10,7 @@ import {
   buildResponsesBody,
   createResponsesAccumulator,
   parseResponsesResult,
+  toFunctionCallItemId,
   toResponsesInput,
   toResponsesTools
 } from './responses';
@@ -62,7 +63,7 @@ describe('toResponsesInput（ChatMessage[] → input 项）', () => {
     expect(toResponsesInput(messages)).toEqual([
       { role: 'user', content: '几点' },
       { role: 'assistant', content: '查一下' },
-      { type: 'function_call', call_id: 'call-1', name: 'get_time', arguments: '{}' },
+      { type: 'function_call', id: 'fc_call-1', call_id: 'call-1', name: 'get_time', arguments: '{}' },
       { type: 'function_call_output', call_id: 'call-1', output: '{"ok":true}' }
     ]);
   });
@@ -78,8 +79,40 @@ describe('toResponsesInput（ChatMessage[] → input 项）', () => {
       }
     ]);
     expect(input).toEqual([
-      { type: 'function_call', call_id: 'c1', name: 'echo', arguments: '{"v":1}' }
+      { type: 'function_call', id: 'fc_c1', call_id: 'c1', name: 'echo', arguments: '{"v":1}' }
     ]);
+  });
+
+  /**
+   * 回归钉：严格端点（AgnesAI /v1/responses，2026-10 实测）要求回灌的 function_call 项
+   * 带 `fc_` 前缀 id，否则整个 input 反序列化失败（400 untagged enum ResponseInput）——
+   * 联网工具循环第二轮即报「LLM 请求失败 [400]」。id 由 call_id 确定性合成。
+   */
+  it('function_call 项 id 必带 fc_ 前缀且由 call_id 确定性合成', () => {
+    const input = toResponsesInput([
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: 'call_abc123', type: 'function', function: { name: 'web_search', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', toolCallId: 'call_abc123', name: 'web_search', content: '{}' }
+    ]) as { type?: string; id?: unknown; call_id?: unknown }[];
+
+    const item = input[0];
+    expect(item.type).toBe('function_call');
+    expect(typeof item.id).toBe('string');
+    expect(String(item.id).startsWith('fc_')).toBe(true);
+    // 与 call_id 解耦但确定：同一 call_id 两次映射得到同一个项 id
+    expect(item.id).toBe('fc_call_abc123');
+    expect(item.id).toBe(toFunctionCallItemId(String(item.call_id)));
+    // 工具结果项无需 id（该端点接受）
+    expect(input[1]).toEqual({
+      type: 'function_call_output',
+      call_id: 'call_abc123',
+      output: '{}'
+    });
   });
 });
 

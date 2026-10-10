@@ -167,6 +167,38 @@ export function checkWebUrl(raw: string, opts: { allowHttp?: boolean } = {}): Ur
   return { ok: true, url: url.toString() };
 }
 
+/** base64url → UTF-8 文本（Bing 跳转参数用；非法输入返回 undefined） */
+function decodeBase64Url(value: string): string | undefined {
+  if (value === '' || !/^[A-Za-z0-9_-]+$/.test(value)) return undefined;
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Bing 跳转包装解包：`https://www.bing.com/ck/a?…&u=a1<base64url>&ntb=1` → 真实目标。
+ * 只对 bing.com 的 `/ck/a` 路径生效——避免把普通 URL 里恰好出现的 `u=a1…` 参数误当包装。
+ */
+function unwrapBingRedirect(raw: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw, 'https://www.bing.com/');
+  } catch {
+    return undefined;
+  }
+  if (!/(^|\.)bing\.com$/i.test(url.hostname) || !url.pathname.startsWith('/ck/a')) return undefined;
+  const wrapped = url.searchParams.get('u');
+  if (wrapped === null || !wrapped.startsWith('a1')) return undefined;
+  const decoded = decodeBase64Url(wrapped.slice(2));
+  return decoded !== undefined && /^https?:\/\//i.test(decoded) ? decoded : undefined;
+}
+
 /**
  * 搜索结果里的链接归一（可能带引擎跳转包装、协议相对 `//`、相对路径）。
  * 返回归一后的绝对 URL 字符串；无法解析返回 undefined（调用方丢弃该条）。
@@ -189,6 +221,8 @@ export function normalizeResultUrl(href: string, baseUrl: string): string | unde
       }
     }
   }
+  const unwrapped = unwrapBingRedirect(raw);
+  if (unwrapped !== undefined) raw = unwrapped;
   if (raw.startsWith('//')) raw = `https:${raw}`;
   try {
     return new URL(raw, baseUrl).toString();

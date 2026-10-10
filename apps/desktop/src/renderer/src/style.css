@@ -1777,6 +1777,49 @@ body {
 }
 .web-source-link:hover { text-decoration-color: #4f46e5; }
 
+/* ===== 阶段 10 硬化：气泡下方的联网结论提示条（超时/部分/失败 + 重试） ===== */
+.web-notice {
+  flex-basis: 100%;
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border: 1px solid rgba(180, 83, 9, 0.35);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: rgba(146, 64, 14, 0.98);
+  font-size: 11.5px;
+  line-height: 1.6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.web-notice.partial,
+/* 降级（换了检索源，资料本身完整）与 partial 同色：是提示不是报错 */
+.web-notice.degraded {
+  border-color: rgba(107, 114, 128, 0.35);
+  background: rgba(107, 114, 128, 0.1);
+  color: rgba(75, 85, 99, 0.98);
+}
+.web-notice-text {
+  min-width: 0;
+  word-break: break-word;
+}
+.web-notice-retry {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.web-notice-retry:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* ===== 阶段 10：设置页「联网检索」区 ===== */
 .web-settings { margin-top: 10px; }
 .web-form {

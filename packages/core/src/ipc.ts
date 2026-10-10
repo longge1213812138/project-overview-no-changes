@@ -5,7 +5,7 @@
 
 import type { AgentApprovalRequest, AgentToolNotice, ToolRisk } from './agent/registry';
 import type { ApiStyle } from './llm/types';
-import type { WebAccessConfig } from './web/types';
+import type { WebAccessConfig, WebSearchEngine } from './web/types';
 
 /**
  * 阶段 10：联网检索配置（renderer 契约面 = core/web 的 WebAccessConfig）。
@@ -21,6 +21,23 @@ export interface WebSourceRef {
   snippet?: string;
 }
 
+/**
+ * 阶段 10：本轮联网检索的用户可见结论（气泡下方提示条 + 重试入口）。
+ *
+ * 四种非正常收场必须能被用户一眼看见（而不是只在模型正文里被转述）：
+ * - 'timeout'：超时（单请求超时或总预算耗尽）——可能已用部分资料作答；
+ * - 'partial'：非超时原因导致资料不全（部分页面 404/解析失败/预算不足被跳过）；
+ * - 'failed' ：没有任何可用资料（源不可达/被拒/解析不出条目）；
+ * - 'degraded'：资料完整，但**来源换了**——主检索源不可达，本轮由备用引擎作答
+ *   （只在「本轮亲自观察到主源失败」时提示一次；之后走短期记忆不再打扰）。
+ * 正常拿到资料时不产生 notice（只列来源列表）。
+ */
+export interface WebNotice {
+  kind: 'timeout' | 'partial' | 'failed' | 'degraded';
+  /** 一句话结论：含具体原因与「本轮是否用了资料作答」（用户可读，不含编造内容） */
+  message: string;
+}
+
 /** 联网配置保存/试跑的结果 */
 export interface WebActionResult {
   ok: boolean;
@@ -33,7 +50,8 @@ export interface WebSearchTestResult {
   ok: boolean;
   /** ok=false 时的可见原因（超时/引擎返回/解析失败） */
   error?: string;
-  engine?: WebAccessConfig['engine'];
+  /** **实际**使用的引擎（主源不可达时会显示降级后的备用源） */
+  engine?: WebSearchEngine;
   items?: WebSourceRef[];
 }
 
@@ -243,6 +261,11 @@ export interface ChatDoneEvent {
    * 无来源时省略。
    */
   sources?: WebSourceRef[];
+  /**
+   * 阶段 10：本轮联网检索的异常收场（超时/部分/失败）——气泡下方提示条据此渲染，
+   * 用户不必从模型正文里猜「到底联没联上」。正常完成时省略。
+   */
+  webNotice?: WebNotice;
 }
 
 export interface ChatBusyEvent {

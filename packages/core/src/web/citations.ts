@@ -5,7 +5,7 @@
  * 编号的意义在于「可追溯」：UI 把同一份编号落在气泡下方当作来源列表，
  * 用户看到 [2] 就能对上具体链接——来源必须来自**真实返回**，模型不得代廪编号。
  */
-import type { WebPageContent, WebSearchItem, WebSource } from './types';
+import type { WebEngineFallback, WebPageContent, WebSearchEngine, WebSearchItem, WebSource } from './types';
 
 /** 摘要型来源 → 引用条目（编号从 1 起） */
 export function toSources(items: WebSearchItem[]): WebSource[] {
@@ -31,11 +31,15 @@ export interface WebContextInput {
   query: string;
   /** 检索时间（用于标注资料新鲜度） */
   retrievedAt: Date;
+  /** 实际给出结果的引擎（降级时是备用引擎；块头必须如实标注，不能让模型/用户以为还是主引擎） */
+  engine: WebSearchEngine;
   sources: WebSource[];
   /** 已抓取的页面正文（按 source.url 关联；只放抓取成功的） */
   pages?: WebPageContent[];
   /** 检索/抓取过程中出现的问题（部分成功也要如实告诉模型） */
   warnings?: string[];
+  /** 主引擎不可达 → 备用引擎顶替时的降级说明（块头标注，模型据此可主动交代） */
+  engineFallback?: WebEngineFallback;
 }
 
 /** 页面正文上限（进系统提示词的单片段长度，避免挤爆上下文预算） */
@@ -50,12 +54,17 @@ function truncate(text: string, max: number): string {
  * 返回空串 = 没有可用资料（调用方应跳过注入，而不是塞一块空壳）。
  */
 export function buildWebContextBlock(input: WebContextInput): string {
-  const { sources, query, retrievedAt, pages = [], warnings = [] } = input;
+  const { sources, query, retrievedAt, pages = [], warnings = [], engineFallback } = input;
   if (sources.length === 0 && warnings.length === 0) return '';
 
+  // 降级写进块头（含原因）：模型据此可主动交代「换了个检索源」，也不必再占一条【检索提示】
+  const fallbackNote =
+    engineFallback !== undefined
+      ? `（主引擎 ${engineFallback.from} 不可达：${engineFallback.reason}，已降级）`
+      : '';
   const lines: string[] = [];
   lines.push(
-    `【联网检索结果】（引擎：duckduckgo；检索词：${query === '' ? '（未提供）' : query}；` +
+    `【联网检索结果】（引擎：${input.engine}${fallbackNote}；检索词：${query === '' ? '（未提供）' : query}；` +
       `共 ${sources.length} 条；检索时间：${retrievedAt.toISOString()}）`
   );
   for (const source of sources) {

@@ -9,6 +9,7 @@ import {
   extractReadableText,
   extractTitle,
   htmlToText,
+  parseBingResultsHtml,
   parseSearchResultsHtml,
   stripTags
 } from './html';
@@ -113,5 +114,45 @@ describe('extractReadableText（页面正文抽取）', () => {
     expect(extractTitle('<title>  标题  </title>')).toBe('标题');
     expect(extractTitle('<p>无标题</p>')).toBeUndefined();
     expect(extractTitle('<title>   </title>')).toBeUndefined();
+  });
+});
+
+/**
+ * Bing 结果页解析（备用检索引擎）：结构与 2026-10 实测一致——
+ * `<li class="b_algo">` → `<h2><a href=…>` 标题 + `<div class="b_caption"><p>` 摘要。
+ */
+function bingHtml(): string {
+  return [
+    '<html><body><ol id="b_results">',
+    '<li class="b_algo" data-id iid=SERP.1><link rel="stylesheet" href="/rp/x.br.css"/>',
+    '<h2><a target="_blank" href="https://nodejs.org/zh-cn" h="ID=SERP,1.2"><strong>Node.js</strong> — 官网</a></h2>',
+    '<div class="b_caption"><p class="b_lineclamp2">Node.js&#174; is a free runtime …',
+    '<a target="_blank" class="b_algoReadMore" href="https://nodejs.org/zh-cn">阅读更多</a></p></div></li>',
+    '<li class="b_algo" data-id iid=SERP.2>',
+    '<h2><a href="https://www.runoob.com/nodejs/nodejs-tutorial.html"><strong>Node.js</strong> 教程</a></h2>',
+    '<div class="b_caption"><p>菜鸟教程：Node.js 教程</p></div></li>',
+    '<li class="b_algo" data-id iid=SERP.3><div class="b_vidinfo">视频卡片（无标题锚点）</div></li>',
+    '</ol></body></html>'
+  ].join('');
+}
+
+describe('parseBingResultsHtml（备用引擎结果页）', () => {
+  it('抽标题/链接/摘要；「阅读更多」不进摘要；无标题锚点的块丢弃', () => {
+    const out = parseBingResultsHtml(bingHtml());
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({
+      title: 'Node.js — 官网',
+      href: 'https://nodejs.org/zh-cn',
+      snippet: 'Node.js® is a free runtime …'
+    });
+    expect(out[1]?.title).toBe('Node.js 教程');
+    expect(out[1]?.href).toBe('https://www.runoob.com/nodejs/nodejs-tutorial.html');
+    expect(out[1]?.snippet).toBe('菜鸟教程：Node.js 教程');
+    expect(JSON.stringify(out)).not.toContain('阅读更多');
+  });
+
+  it('空输入/风控页 → 空数组（上层据此报 parse 失败，不假成功）', () => {
+    expect(parseBingResultsHtml('')).toEqual([]);
+    expect(parseBingResultsHtml('<html><body>验证码页面</body></html>')).toEqual([]);
   });
 });

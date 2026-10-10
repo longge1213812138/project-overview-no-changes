@@ -50,6 +50,7 @@ import type {
   ScheduleScope,
   SessionMeta,
   SessionStore,
+  WebNotice,
   WebSourceRef
 } from '@fairy/core'
 import { cancelAllPending, requestApproval } from './agent-approval'
@@ -322,6 +323,8 @@ async function runGeneration(
   //   （记忆/日程动作不需要外部资料）；异常一律按「检索失败」告知模型，绝不中断回复。
   let webSources: WebSourceRef[] = []
   let webContext = ''
+  /** 阶段 10 硬化：本轮联网的非正常收场（超时/部分/失败）→ 气泡下方提示条 + 重试入口 */
+  let webNotice: WebNotice | undefined
   try {
     if (resolved.channel === 'api' && intent.intent === 'chat') {
       // 联网可能耗时数秒 → 先给可见的阶段提示（note 缺省即清掉），避免用户以为卡住
@@ -331,6 +334,7 @@ async function runGeneration(
         if (retrieval !== null) {
           webContext = retrieval.block
           webSources = retrieval.sources
+          webNotice = retrieval.notice
         }
       } finally {
         broadcast(IPC.chatBusy, { sessionId } satisfies ChatBusyEvent) // 清掉阶段提示
@@ -380,6 +384,8 @@ async function runGeneration(
     // 阶段 10：来源列表同步下发（聊天/中止/出错各路径都要让用户看见这次用了哪些资料）
     let payload = capabilityHint !== undefined ? { ...event, capabilityHint } : event
     if (webSources.length > 0) payload = { ...payload, sources: webSources }
+    // 阶段 10 硬化：超时/部分/失败同样各路径下发（用户不必从模型正文里猜联没联上）
+    if (webNotice !== undefined) payload = { ...payload, webNotice }
     broadcast(IPC.chatDone, payload)
   }
 
@@ -456,7 +462,9 @@ async function runGeneration(
         // 阶段 7：能力提示落 meta，重开会话仍可见（否则只存活于当次 chatDone）
         ...(capabilityHint !== undefined ? { capabilityHint } : {}),
         // 阶段 10：来源列表落 meta（气泡下方引用列表，重开会话仍在）
-        ...(webSources.length > 0 ? { sources: webSources } : {})
+        ...(webSources.length > 0 ? { sources: webSources } : {}),
+        // 阶段 10 硬化：联网超时/部分/失败提示同样落 meta（重开会话仍看得见）
+        ...(webNotice !== undefined ? { webNotice } : {})
       }
     })
     emitDone({ sessionId, messageId, ok: true, elapsedMs })
@@ -472,7 +480,8 @@ async function runGeneration(
         meta: {
           aborted: true,
           elapsedMs,
-          ...(webSources.length > 0 ? { sources: webSources } : {})
+          ...(webSources.length > 0 ? { sources: webSources } : {}),
+          ...(webNotice !== undefined ? { webNotice } : {})
         }
       })
       emitDone({ sessionId, messageId, ok: true, aborted: true, elapsedMs })
@@ -482,7 +491,11 @@ async function runGeneration(
     const message = err instanceof Error ? err.message : String(err)
     s.updateMessage(messageId, {
       content,
-      meta: { error: message, ...(webSources.length > 0 ? { sources: webSources } : {}) }
+      meta: {
+        error: message,
+        ...(webSources.length > 0 ? { sources: webSources } : {}),
+        ...(webNotice !== undefined ? { webNotice } : {})
+      }
     })
     emitDone({ sessionId, messageId, ok: false, error: message, elapsedMs })
   } finally {

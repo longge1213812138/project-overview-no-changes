@@ -9,8 +9,10 @@ import type {
   ChatDeltaEvent,
   ChatDoneEvent,
   MessageDto,
+  WebNotice,
   WebSourceRef
 } from '@fairy/core'
+import WebNoticeBar from './WebNoticeBar'
 import 'highlight.js/styles/github-dark.css'
 
 /**
@@ -43,6 +45,8 @@ interface LocalMessage {
   hint: string
   /** 阶段 10：本轮联网来源（meta.sources，气泡下方引用列表） */
   sources: WebSourceRef[]
+  /** 阶段 10 硬化：本轮联网结论（超时/部分/失败 → 提示条 + 重试；正常为 null） */
+  notice: WebNotice | null
 }
 
 const EXAMPLE_PROMPTS = [
@@ -100,6 +104,32 @@ function metaSources(meta: MessageDto['meta']): WebSourceRef[] {
   return out
 }
 
+/**
+ * meta.webNotice 容错解析（阶段 10 硬化）：只接受 {kind, message} 且 kind 在枚举内、
+ * message 非空的形状；脏数据当没有（提示条不猜、不半渲染）。
+ */
+function metaNotice(meta: MessageDto['meta']): WebNotice | null {
+  const v = meta?.['webNotice']
+  if (typeof v !== 'object' || v === null) return null
+  const item = v as Record<string, unknown>
+  const kind = item['kind']
+  const message = item['message']
+  if (kind !== 'timeout' && kind !== 'partial' && kind !== 'failed' && kind !== 'degraded') {
+    return null
+  }
+  if (typeof message !== 'string' || message.trim() === '') return null
+  return { kind, message }
+}
+
+/** 该助手消息之前最近的一条用户消息文本（重试 = 重发它；找不到返回空串） */
+function precedingUserText(list: LocalMessage[], index: number): string {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const m = list[i]
+    if (m.role === 'user' && m.content.trim() !== '') return m.content
+  }
+  return ''
+}
+
 /** delta → 追加到对应条目（找不到则收养乐观占位 / 末尾新建） */
 function appendDelta(
   list: LocalMessage[],
@@ -124,7 +154,8 @@ function appendDelta(
           error: null,
           streaming: true,
           hint: '',
-          sources: []
+          sources: [],
+          notice: null
         }
       ]
     }
@@ -159,6 +190,8 @@ function finalizeMessage(list: LocalMessage[], e: ChatDoneEvent): LocalMessage[]
   msg.streaming = false
   // 阶段 10：本轮来源随 done 落到条目上（空数组 = 本轮未联网）
   if (e.sources !== undefined) msg.sources = e.sources
+  // 阶段 10 硬化：联网结论同样随 done 落到条目上（本轮正常完成 → null，不残留上一轮提示）
+  msg.notice = e.webNotice ?? null
   // 阶段 7：通道能力提示随 done 落到条目上（非空才展示）
   if (e.capabilityHint) msg.hint = e.capabilityHint
   if (!e.ok && e.error) msg.error = e.error
@@ -211,6 +244,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             reasoning: metaString(row.meta, 'reasoning'),
             hint: metaString(row.meta, 'capabilityHint'),
             sources: metaSources(row.meta),
+            notice: metaNotice(row.meta),
             error: metaString(row.meta, 'error') || null,
             streaming: false
           }))
@@ -297,7 +331,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           error: null,
           streaming: false,
           hint: '',
-          sources: []
+          sources: [],
+          notice: null
         },
         {
           key: asstKey,
@@ -308,7 +343,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           error: null,
           streaming: true,
           hint: '',
-          sources: []
+          sources: [],
+          notice: null
         }
       ])
       stickRef.current = true
@@ -370,7 +406,11 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             ))}
           </div>
         )}
-        {messages.map((m) => (
+        {messages.map((m, i) => {
+          // 重试 = 重发这条回复对应的上一条用户消息（历史/流式两种来源都在本地列表里）
+          const retryText =
+            m.role === 'assistant' && m.notice !== null ? precedingUserText(messages, i) : ''
+          return (
           <div key={m.key} className={`msg-row ${m.role}`}>
             <div
               className={`bubble ${m.role}${m.streaming ? ' streaming' : ''}`}
@@ -416,8 +456,17 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
                 </ul>
               </div>
             )}
+            {/* 阶段 10 硬化：联网结论（超时/部分/失败）+ 重试入口 */}
+            {m.role === 'assistant' && m.notice !== null && (
+              <WebNoticeBar
+                notice={m.notice}
+                busy={busy}
+                {...(retryText !== '' ? { onRetry: () => void handleSend(retryText) } : {})}
+              />
+            )}
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <div className="chat-input-area">

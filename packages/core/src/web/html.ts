@@ -162,3 +162,44 @@ export function parseSearchResultsHtml(html: string): ParsedSearchResult[] {
     snippet: snippets[i] ?? ''
   }));
 }
+
+/** 「阅读更多」是页面控件不是摘要内容（Bing 摘要里的尾链） */
+const BING_READ_MORE_PATTERN = /<a\b[^>]*class="[^"]*\bb_algoReadMore\b[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
+
+/**
+ * 解析 Bing 结果页（`https://www.bing.com/search?q=…`，zh-CN/en 同构；2026-10 实测）。
+ *
+ * 条目形如：
+ * ```html
+ * <li class="b_algo" …>
+ *   …（站点卡片 / 样式 link，一律忽略）…
+ *   <h2><a target="_blank" href="https://nodejs.org/zh-cn" …>标题</a></h2>
+ *   <div class="b_caption"><p class="b_lineclamp2" …>摘要 …<a class="b_algoReadMore">阅读更多</a></p></div>
+ * </li>
+ * ```
+ * 链接多为**直链**（部分变体走 `/ck/a?…u=a1<base64url>` 包装，由 normalizeResultUrl 解包）；
+ * 标题/摘要都经 htmlToText（去标签 + 解码实体 + 折叠空白），高亮用的 `<strong>` 不会撕出空格。
+ */
+export function parseBingResultsHtml(html: string): ParsedSearchResult[] {
+  if (typeof html !== 'string' || html.trim() === '') return [];
+  const out: ParsedSearchResult[] = [];
+  const blockRe = /<li\b[^>]*class="[^"]*\bb_algo\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = blockRe.exec(html)) !== null && out.length < RESULT_LIMIT) {
+    const block = m[1] ?? '';
+    const anchor = block.match(/<h2\b[^>]*>[\s\S]*?<a\b[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a\s*>/i);
+    if (anchor === null) continue; // 无标题锚点的块（广告/视频卡等）直接丢
+    const href = anchor[1] ?? '';
+    const title = htmlToText(anchor[2] ?? '');
+    let snippet = '';
+    const caption = block.match(
+      /<div\b[^>]*class="[^"]*\bb_caption\b[^"]*"[^>]*>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p\s*>/i
+    );
+    if (caption !== null) {
+      snippet = htmlToText((caption[1] ?? '').replace(BING_READ_MORE_PATTERN, ' '));
+    }
+    if (title === '' && snippet === '') continue;
+    out.push({ title, href, snippet });
+  }
+  return out;
+}

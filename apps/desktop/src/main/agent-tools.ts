@@ -16,16 +16,9 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
-import {
-  ToolRegistry,
-  createBuiltinTools,
-  createWebTools,
-  fetchWebPage,
-  probeToolsSupport,
-  searchWeb
-} from '@fairy/core'
-import type { CapabilityProbe, LlmClient, WebFetchResult, WebSearchResult } from '@fairy/core'
-import { getWebConfig } from './web'
+import { ToolRegistry, createBuiltinTools, createWebTools, probeToolsSupport } from '@fairy/core'
+import type { CapabilityProbe, LlmClient } from '@fairy/core'
+import { createWebToolDeps, getWebConfig } from './web'
 import { log } from './logger'
 
 let registry: ToolRegistry | null = null
@@ -76,24 +69,8 @@ export function syncWebTools(): ToolRegistry {
     log.info('[tools]', '联网开关已关闭：web_search / web_fetch 未注册')
     return reg
   }
-  const registrations = createWebTools({
-    search: (
-      query: string,
-      opts: { maxResults?: number; signal?: AbortSignal }
-    ): Promise<WebSearchResult> =>
-      searchWeb(query, getWebConfig(), {
-        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-        ...(opts.maxResults !== undefined ? { maxResults: opts.maxResults } : {})
-      }),
-    fetchPage: (
-      url: string,
-      opts: { maxChars?: number; signal?: AbortSignal }
-    ): Promise<WebFetchResult> =>
-      fetchWebPage(url, getWebConfig(), {
-        ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-        ...(opts.maxChars !== undefined ? { maxChars: opts.maxChars } : {})
-      })
-  })
+  // 依赖注入统一在 web.ts（预检索与工具路径共用同一套预算/重试/超时口径）
+  const registrations = createWebTools(createWebToolDeps())
   for (const registration of registrations) {
     reg.register(registration)
   }

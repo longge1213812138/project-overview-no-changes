@@ -31,13 +31,36 @@ describe('toSources（编号与顺序）', () => {
 
 describe('buildWebContextBlock', () => {
   it('无来源且无警告 → 空串（调用方应跳过注入，不塞空壳）', () => {
-    expect(buildWebContextBlock({ query: 'q', retrievedAt: RETRIEVED_AT, sources: [] })).toBe('');
+    expect(
+      buildWebContextBlock({ query: 'q', retrievedAt: RETRIEVED_AT, engine: 'duckduckgo', sources: [] })
+    ).toBe('');
+  });
+
+  it('块头标注**实际**引擎；降级时写明「主引擎不可达，已降级」', () => {
+    const direct = buildWebContextBlock({
+      query: 'q',
+      retrievedAt: RETRIEVED_AT,
+      engine: 'bing',
+      sources: toSources(items(1))
+    });
+    expect(direct).toContain('引擎：bing');
+    expect(direct).not.toContain('已降级');
+
+    const degraded = buildWebContextBlock({
+      query: 'q',
+      retrievedAt: RETRIEVED_AT,
+      engine: 'bing',
+      engineFallback: { from: 'duckduckgo', reason: '检索失败：fetch failed', observedNow: true },
+      sources: toSources(items(1))
+    });
+    expect(degraded).toContain('引擎：bing（主引擎 duckduckgo 不可达：检索失败：fetch failed，已降级）');
   });
 
   it('块内含检索词/时间/编号/链接/摘要 + 引用规范', () => {
     const block = buildWebContextBlock({
       query: '格莱美获奖名单',
       retrievedAt: RETRIEVED_AT,
+      engine: 'duckduckgo',
       sources: toSources(items(2))
     });
     expect(block).toContain('检索词：格莱美获奖名单');
@@ -52,6 +75,7 @@ describe('buildWebContextBlock', () => {
     const block = buildWebContextBlock({
       query: 'q',
       retrievedAt: RETRIEVED_AT,
+      engine: 'duckduckgo',
       sources: toSources(items(1)),
       pages: [{ url: 'https://example.com/1', title: '来源 1', content: '正文内容很长', truncated: true }]
     });
@@ -63,6 +87,7 @@ describe('buildWebContextBlock', () => {
     const block = buildWebContextBlock({
       query: 'q',
       retrievedAt: RETRIEVED_AT,
+      engine: 'duckduckgo',
       sources: toSources(items(1)),
       pages: [{ url: 'https://example.com/1', title: 't', content: long, truncated: false }]
     });
@@ -74,6 +99,7 @@ describe('buildWebContextBlock', () => {
     const block = buildWebContextBlock({
       query: 'q',
       retrievedAt: RETRIEVED_AT,
+      engine: 'duckduckgo',
       sources: toSources(items(2)),
       warnings: ['https://example.com/2 正文抓取失败（超时）']
     });
