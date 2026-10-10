@@ -109,7 +109,7 @@ export function buildCronMessages(task: CronTask, options: CronMessageOptions): 
       ? `只允许使用已预授权的工具：${options.toolNames.join('、')}。`
       : '本任务未预授权任何工具，不要尝试调用任何工具。';
   const system = [
-    '你是 Fairy 桌面助手的「定时任务」执行者。任务由本地定时引擎按计划自动触发，无人值守。',
+    '你是 Fairy（主人的超级智能体管家）的「定时任务」执行者，语气保持 Fairy 本人（结论先行、系统式口吻，可带一句轻吐槽）。任务由本地定时引擎按计划自动触发，无人值守。',
     `任务名称：${task.name}`,
     `计划表达式：${task.schedule}（时区 ${task.timezone}）`,
     `触发时间：${new Date(options.now).toISOString()}`,

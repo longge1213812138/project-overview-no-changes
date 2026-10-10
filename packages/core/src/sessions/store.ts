@@ -9,7 +9,8 @@ import type { MessageDto, SessionMeta } from '../ipc';
 import { QUICK_SESSION_ID } from '../ipc';
 import type { ChatMessage } from '../llm/types';
 import { openDatabase } from '../store';
-import { CONTEXT_BUDGET_CHARS, FAIRY_SYSTEM_PROMPT, trimToBudget } from './trim';
+import { FAIRY_SYSTEM_PROMPT } from './persona';
+import { CONTEXT_BUDGET_CHARS, trimToBudget } from './trim';
 
 export interface SessionStore {
   /** updatedAt 降序 */

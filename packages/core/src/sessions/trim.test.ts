@@ -4,7 +4,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../llm/types';
-import { CONTEXT_BUDGET_CHARS, FAIRY_SYSTEM_PROMPT, trimToBudget } from './trim';
+import { FAIRY_SYSTEM_PROMPT } from './persona';
+import { CONTEXT_BUDGET_CHARS, trimToBudget } from './trim';
 
 const u = (content: string): ChatMessage => ({ role: 'user', content });
 

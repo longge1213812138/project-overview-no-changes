@@ -49,10 +49,11 @@ interface LocalMessage {
   notice: WebNotice | null
 }
 
+/** 空状态示例：各点一条，正好演示「记忆 / 联网 / 日程」三个模块 */
 const EXAMPLE_PROMPTS = [
-  '用三句话介绍一下 Transformer 的注意力机制',
-  '帮我写一封明天上午请假半天的邮件',
-  '今晚吃什么？给三个 20 分钟能做完的家常菜'
+  '记住我喜欢冰美式，以后别推荐热的',
+  '联网查一下 Node LTS 最新版本',
+  '明天上午 10 点提醒我交周报'
 ]
 
 /** 工具状态 → 中文短文案（工具状态行用，见 toolNoticeText） */
@@ -397,8 +398,8 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
       <div className="chat-messages" ref={scrollRef} onScroll={handleScroll}>
         {loaded && messages.length === 0 && (
           <div className="empty-state">
-            <h2>🧚 有什么可以帮你？</h2>
-            <p>直接输入问题开始对话，或试试下面的示例：</p>
+            <h2>Fairy 待命中——</h2>
+            <p>检索、联网、日程、记忆四个模块全部在线。说吧，主人；也可以先点下面这几条开个头：</p>
             {EXAMPLE_PROMPTS.map((p) => (
               <button key={p} className="example-btn" onClick={() => void handleSend(p)}>
                 {p}
@@ -439,7 +440,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             {/* 阶段 10：联网来源（与正文里的 [n] 编号对应；点击走系统浏览器） */}
             {m.role === 'assistant' && m.sources.length > 0 && (
               <div className="web-sources">
-                <span className="web-sources-title">🌐 本次参考了 {m.sources.length} 个来源</span>
+                <span className="web-sources-title">🌐 检索完成——本次参考了 {m.sources.length} 个来源</span>
                 <ul>
                   {m.sources.map((s) => (
                     <li key={`${s.id}-${s.url}`}>
@@ -477,7 +478,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
             className="chat-input"
             rows={1}
             value={input}
-            placeholder="输入消息，Enter 发送 / Shift+Enter 换行"
+            placeholder="对 Fairy 说点什么（Enter 发送 · Shift+Enter 换行）"
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
           />
@@ -500,7 +501,7 @@ export default function ChatPane({ sessionId, float = false }: ChatPaneProps) {
           <span className="foot-status">
             {busy && toolStatus && <span className="tool-status">{toolStatus}</span>}
             {busy && busyNote && <span className="tool-status">{busyNote}</span>}
-            {busy && <span className="gen-hint">生成中…</span>}
+            {busy && <span className="gen-hint">Fairy 运算中…</span>}
           </span>
         </div>
       </div>

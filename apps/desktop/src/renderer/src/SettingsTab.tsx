@@ -122,7 +122,7 @@ export default function SettingsTab() {
       {/* ===== 顶部「当前通道」状态条 ===== */}
       {state ? <ChannelStatusBar state={state} /> : (
         <div className="status-card card-neutral">
-          <p className="card-title">通道状态加载中…</p>
+          <p className="card-title">正在读取 Fairy 的思维来源状态…</p>
         </div>
       )}
 
@@ -130,9 +130,9 @@ export default function SettingsTab() {
       <section className="api-config">
         <h3>OpenAI 兼容 API 配置</h3>
         <p className="section-hint">
-          可接官方 DeepSeek API（Base URL 默认 https://api.deepseek.com/v1，模型默认 deepseek-chat）
-          或任意 OpenAI 兼容端点；接口风格支持 Chat Completions（/v1/chat/completions）与
-          Responses（/v1/responses）两种；保存即启用。
+          Fairy 的思维接在这里：可接官方 DeepSeek API（Base URL 默认 https://api.deepseek.com/v1，
+          模型默认 deepseek-chat）或任意 OpenAI 兼容端点；接口风格支持 Chat Completions
+          （/v1/chat/completions）与 Responses（/v1/responses）两种；保存即启用。
         </p>
         <form
           className="setting-form"
@@ -198,7 +198,7 @@ export default function SettingsTab() {
       {channel !== null && (
         <section className="test-block">
           <h3>测试对话</h3>
-          <p className="section-hint">发送一条非流式测试消息，验证当前配置的链路可用。</p>
+          <p className="section-hint">发一条非流式测试消息验证链路（探针调用，不带人设——回答的语气就是这个模型的底色）。</p>
           <div className="test-row">
             <input
               className="test-input"
@@ -216,7 +216,7 @@ export default function SettingsTab() {
           </div>
           {testResult?.ok && (
             <div className="status-card card-green">
-              <p className="card-title">✓ 测试成功，链路正常</p>
+              <p className="card-title">✓ 链路正常——Fairy 的思维回路已接通</p>
               <p className="card-detail">{testResult.content}</p>
             </div>
           )}
@@ -299,8 +299,8 @@ function AppSettingsSection() {
     <section className="app-settings">
       <h3>应用</h3>
       <p className="section-hint">
-        开机自启随安装默认开启（安装选项页可改）；日志按天滚动、保留 7 天。诊断报告只含
-        版本/系统/通道状态与日志尾部，不含账号凭据。
+        Fairy 的作息与体检报告：开机自启随安装默认开启（安装选项页可改）；日志按天滚动、保留 7 天。
+        诊断报告只含版本/系统/通道状态与日志尾部，不含账号凭据。
       </p>
       <label className="toggle-row">
         <input
@@ -426,10 +426,10 @@ function WebSection() {
     <section className="web-settings">
       <h3>联网检索</h3>
       <p className="section-hint">
-        仅 API 通道可用（网页通道不做联网适配）。触发条件：① 你明确要求（联网/搜一下/帮我查…）；
+        Fairy 的外感官（仅 API 通道可用）。触发条件：① 你明确要求（联网/搜一下/帮我查…）；
         ② 问题涉及最新信息（最新/今天/新闻/天气/股价…）；③ 直接给出了链接。普通闲聊不联网。
         每次检索都会在回答气泡下方列出实际用到的来源；模型主动调用 web_search / web_fetch 时每次都要你确认。
-        检索词会发送给 DuckDuckGo，关闭开关即完全不外发请求。
+        检索词会发送给检索引擎（主源 DuckDuckGo；本机不可达时自动降级到 Bing 备用源），关闭开关即完全不外发请求。
       </p>
       {cfg === null ? (
         <p className="section-hint">读取中…</p>
@@ -496,7 +496,7 @@ function WebSection() {
       )}
 
       <div className="web-test">
-        <p className="section-hint">试跑一次检索（验证链路与来源过滤，不写入任何会话）。</p>
+        <p className="section-hint">试跑一次检索——验证链路与来源过滤，不写入任何会话（顺带看看这次用的是哪个源）。</p>
         <div className="test-row">
           <input
             value={testQuery}
@@ -595,9 +595,10 @@ function SkillsSection() {
     <section className="skills-settings">
       <h3>技能（Skill）</h3>
       <p className="section-hint">
-        把技能包放入 <code>%APPDATA%\fairy\skills\&lt;目录&gt;\</code>（含 skill.json）。新发现的技能默认禁用；
-        包内容一变会自动停用、需重新启用；启用后其工具仍<strong>每次调用逐一审批</strong>，审批框展示「扩展」徽标与
-        来源/声明权限。应用不提供任何网络安装来源。
+        给 Fairy 装新本事：把技能包放入 <code>%APPDATA%\fairy\skills\&lt;目录&gt;\</code>（含 skill.json）。
+        新发现的技能默认禁用；包内容一变会自动停用、需重新启用；启用后其工具仍
+        <strong>每次调用逐一审批</strong>，审批框展示「扩展」徽标与来源/声明权限。
+        应用不提供任何网络安装来源。
       </p>
       <div className="skills-head">
         <button className="btn" onClick={() => void handleReload()} disabled={busy !== null}>
@@ -605,7 +606,7 @@ function SkillsSection() {
         </button>
       </div>
       {items !== null && items.length === 0 && (
-        <p className="section-hint">尚未发现技能包（目录已就绪；放入技能包后点「重新扫描」）。</p>
+        <p className="section-hint">Fairy 还没有新本事——目录已就绪，放入技能包后点「重新扫描」。</p>
       )}
       <ul className="skills-list">
         {items?.map((s) => (
@@ -746,9 +747,10 @@ function McpSection() {
     <section className="mcp-settings">
       <h3>MCP 服务器</h3>
       <p className="section-hint">
-        外部工具服务（stdio 协议）。不自动连接：保存后在列表手动「连接」，其工具即进入统一审批链
-        （「扩展」徽标 + 每次调用逐一确认）。环境变量（可能含 token）加密存入 DPAPI，此处只回显
-        变量名；命令行不含 shell 解释，Windows 下需 node 脚本请直接填 node.exe 绝对路径。
+        给 Fairy 接外挂：外部工具服务（stdio 协议）。不自动连接——保存后在列表手动「连接」，
+        其工具即进入统一审批链（「扩展」徽标 + 每次调用逐一确认）。环境变量（可能含 token）
+        加密存入 DPAPI，此处只回显变量名；命令行不含 shell 解释，Windows 下需 node 脚本请直接填
+        node.exe 绝对路径。
       </p>
       <div className="skills-head">
         <button
@@ -798,7 +800,7 @@ function McpSection() {
       )}
 
       {items !== null && items.length === 0 && (
-        <p className="section-hint">尚未配置 MCP 服务器（点「添加服务器」）。</p>
+        <p className="section-hint">还没有外接服务——点「添加服务器」接一个。</p>
       )}
       <ul className="skills-list">
         {items?.map((s) => (
@@ -869,7 +871,8 @@ function ChannelStatusBar({ state }: { state: ChannelState }) {
       <div className="status-card card-yellow channel-status">
         <p className="card-title">尚未配置接入方式</p>
         <p className="card-hint">
-          在下方填写 OpenAI 兼容 API 的 Base URL / API Key / 模型并「保存并启用」即可开始使用。
+          Fairy 现在没有思维来源。在下方填写 OpenAI 兼容 API 的 Base URL / API Key / 模型，
+          点「保存并启用」——我就上线。
         </p>
       </div>
     )

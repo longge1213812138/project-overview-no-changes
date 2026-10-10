@@ -66,8 +66,8 @@ function MainWindow() {
               <ChatPane key={sessionId} sessionId={sessionId} />
             ) : (
               <div className="placeholder">
-                <h2>聊天</h2>
-                <p>点击左侧「＋ 新建会话」开始对话。</p>
+                <h2>Fairy 待命中——</h2>
+                <p>点左侧「＋ 新建会话」开一段新对话；想随手问一句，也可以 Alt+Space 呼出浮窗。</p>
               </div>
             )}
           </div>
