@@ -32,6 +32,64 @@ app.setAppUserModelId('com.fairy.assistant')
 
 let tray: Tray | null = null
 
+/**
+ * 顶部菜单栏中文化（仅 UI 文案改动）：
+ * 未显式设置应用菜单时 Electron 显示默认英文菜单（File/Edit/View/Window/Help），
+ * 这里以同一批 role 重建为中文——剪贴板、缩放、开发者工具、窗口控制等功能与快捷键保持不变。
+ */
+function installAppMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { label: '文件', submenu: [{ role: 'quit', label: '退出' }] },
+      {
+        label: '编辑',
+        submenu: [
+          { role: 'undo', label: '撤销' },
+          { role: 'redo', label: '重做' },
+          { type: 'separator' },
+          { role: 'cut', label: '剪切' },
+          { role: 'copy', label: '复制' },
+          { role: 'paste', label: '粘贴' },
+          { role: 'delete', label: '删除' },
+          { type: 'separator' },
+          { role: 'selectAll', label: '全选' }
+        ]
+      },
+      {
+        label: '视图',
+        submenu: [
+          { role: 'reload', label: '重新加载' },
+          { role: 'forceReload', label: '强制重新加载' },
+          { role: 'toggleDevTools', label: '开发者工具' },
+          { type: 'separator' },
+          { role: 'resetZoom', label: '实际大小' },
+          { role: 'zoomIn', label: '放大' },
+          { role: 'zoomOut', label: '缩小' },
+          { type: 'separator' },
+          { role: 'togglefullscreen', label: '全屏' }
+        ]
+      },
+      {
+        label: '窗口',
+        submenu: [
+          { role: 'minimize', label: '最小化' },
+          { role: 'close', label: '关闭窗口' }
+        ]
+      },
+      {
+        label: '帮助',
+        submenu: [
+          {
+            label: `关于 ${APP_NAME}`,
+            click: () =>
+              new Notification({ title: APP_NAME, body: `版本 ${FAIRY_VERSION}` }).show()
+          }
+        ]
+      }
+    ])
+  )
+}
+
 function createTray(): void {
   const image = nativeImage.createFromPath(iconPath())
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image)
@@ -76,6 +134,7 @@ if (!app.requestSingleInstanceLock()) {
     log.info(
       `[autostart] openAtLogin=${isAutoStartEnabled()}（Run 值名 ${AUTOSTART_RUN_NAME}）| userData=${app.getPath('userData')}`
     )
+    installAppMenu() // 顶部菜单栏：默认英文菜单 → 中文（功能不变）
     createMainWindow()
     createFloatWindow() // 预建隐藏：Alt+Space show 即出（DEV_PLAN §8 风险表）
     createTray()

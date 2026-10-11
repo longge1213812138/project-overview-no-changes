@@ -53,12 +53,6 @@ body {
   color: #fff;
 }
 
-.version {
-  margin-left: auto;
-  font-size: 12px;
-  opacity: 0.55;
-}
-
 .content {
   flex: 1;
   overflow: auto;

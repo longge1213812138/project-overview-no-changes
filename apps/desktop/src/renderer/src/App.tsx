@@ -1,4 +1,4 @@
-import { APP_NAME, FAIRY_VERSION, QUICK_SESSION_ID } from '@fairy/core'
+import { APP_NAME, QUICK_SESSION_ID } from '@fairy/core'
 import { useCallback, useEffect, useState } from 'react'
 import SettingsTab from './SettingsTab'
 import ApprovalDialog from './agent/ApprovalDialog'
@@ -9,7 +9,7 @@ import CronPanel from './cron/CronPanel'
 import MemoryPanel from './memory/MemoryPanel'
 
 /**
- * 阶段 3：主窗口 = 顶栏（logo + 版本）→ 中部内容区 → 底部 tab（聊天/日程/记忆/定时/设置）。
+ * 阶段 3：主窗口 = 顶栏（logo）→ 中部内容区 → 底部 tab（聊天/日程/记忆/定时/设置）。
  * 浮窗模式（?float=1，main/windows.ts 载入）= 仅聊天面板（快速会话 QUICK_SESSION_ID），
  * 无侧栏无 tab，底部一行快捷键提示（Esc 由 main 侧 before-input-event 处理）。
  */
@@ -55,7 +55,6 @@ function MainWindow() {
     <div className="shell">
       <header className="titlebar">
         <span className="logo">🧚 {APP_NAME}</span>
-        <span className="version">v{FAIRY_VERSION} · 阶段 3</span>
       </header>
 
       <main className={tab === 'chat' ? 'content content-chat' : 'content'}>
