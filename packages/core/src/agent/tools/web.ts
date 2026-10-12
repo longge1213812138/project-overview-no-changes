@@ -15,6 +15,7 @@ import type { ToolAssessment, ToolRegistration } from '../registry';
 import type { AgentToolContext } from '../runtime';
 import type { WebFetchResult, WebSearchResult } from '../../web/types';
 import { checkWebUrl } from '../../web/urlguard';
+import { cleanupQuery } from '../../web/trigger';
 
 const SEARCH_DEFINITION: ChatToolDefinition = {
   type: 'function',
@@ -167,7 +168,10 @@ export function createWebTools(deps: WebToolDeps): ToolRegistration[] {
             throw new Error(assessSearch(raw).reason ?? '工具策略拒绝执行');
           }
           throwIfAborted(ctx.signal);
-          const query = raw.query.trim();
+          // 与预检索路径同一口径：模型给的检索词同样要剥掉前导时效词与疑问外壳。
+          // 否则模型照抄用户原话（「最近的AI圈有什么新闻」）时会踩同一个坑：Bing 锚定
+          // 「最近」本身，返回歌曲《最近》而不是新闻。清洗后为空则回退原词。
+          const query = cleanupQuery(raw.query.trim());
           const result = await deps.search(query, {
             ...(raw.maxResults !== undefined ? { maxResults: raw.maxResults } : {}),
             ...(ctx.signal !== undefined ? { signal: ctx.signal } : {})

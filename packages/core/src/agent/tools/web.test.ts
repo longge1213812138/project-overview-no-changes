@@ -100,6 +100,20 @@ describe('web_search 注册项', () => {
   });
 
   /**
+   * 回归：模型常直接把用户原话当检索词。若原话以时效词起头，Bing 会锚定该词本身
+   * （「最近的AI圈有什么新闻」→ 歌曲《最近》），工具路径必须与预检索路径同样清洗。
+   */
+  it('execute：模型照抄用户原话时也剥掉前导时效词', async () => {
+    const spy = vi.fn(async (query: string) => ({ query, engine: 'bing' as const, items: [] }));
+    const [searchTool] = createWebTools({
+      search: spy,
+      fetchPage: async (url) => ({ url, title: '', content: '', truncated: false })
+    });
+    await searchTool.tool.execute({ query: '最近的AI圈有什么新闻' }, {});
+    expect(spy).toHaveBeenCalledWith('AI圈 新闻', expect.anything());
+  });
+
+  /**
    * 正文摘录透传：模型要靠它一次调用拿到事实（摘要多是首页 SEO 样板），
    * 空摘录/缺字段一律不落进输出（不给模型掺空壳）。
    */

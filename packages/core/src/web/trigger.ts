@@ -84,8 +84,44 @@ export function extractUrls(message: string): string[] {
 }
 
 /**
- * 清洗检索词：去掉命令动词、联网词、链接与客套话，留下真正要查的内容。
- * 清洗后为空则回退到原句（保证「总有东西可查」）。
+ * 前导时效词：口语问句几乎都以它开头（「最近的…」「今天…」），
+ * 但它对检索引擎是**有害**的——见 cleanupQuery 的说明。
+ * 允许尾随「的」（「最近的AI圈…」），否则会留下悬空的「的」把首个词粘坏。
+ */
+const LEADING_FRESHNESS =
+  /^(?:最近|近期|近日|最新|今天|今日|昨天|昨日|本周|本月|今年|上个月|刚刚|这几天|这几天来)(?:的)?\s*/;
+
+/**
+ * 疑问外壳：对检索引擎没有信息量，还会把中文分词切坏（「有什么新闻」→「有/什么/新闻」）。
+ * 只在**句中**出现时剥成空格，避免把「怎么样」这类真正携带语义的片段误删。
+ */
+const QUESTION_SHELL = /(有什么|有哪些|是哪些|怎么样|如何|是什么|什么样|咋样)/g;
+
+/** 句末语气助词与结构助词（「呢」「吗」「的」） */
+const TRAILING_PARTICLES = /[的了吗呢吧啊呀哦嘛]+$/;
+
+/**
+ * 剥掉时效词后**悬空**的前缀：结构助词「的」与量词「款/个/届/期/次」。
+ * 「最新款 iPhone 价格」剥掉「最新」后会留下「款」，直接发出去等于拿「款」当检索词；
+ * 「最新版本的 Node」会留下「版本的」。两者都该一并去掉。
+ */
+const DANGLING_AFTER_FRESHNESS = /^(?:的|款|个|届|期|次)\s*/;
+
+/**
+ * 清洗检索词：去掉命令动词、联网词、链接、客套话，**以及前导时效词与疑问外壳**，
+ * 留下真正要查的内容。清洗后为空则回退到原句（保证「总有东西可查」）。
+ *
+ * 为什么必须剥掉前导时效词与疑问外壳（2026-10-12 实测，DEV_PLAN §5.10）：
+ * Bing 的中文匹配会**锚定在查询的首个词**上。用户问「最近的AI圈有什么新闻」时，
+ * 引擎把它当成以「最近」为主的查询，于是返回李圣杰的歌曲《最近》、百度百科「最近」
+ * 词条、QQ 音乐首页——**10 条结果里 0 条与 AI 有关**，而 Bing 回显的确实是完整原句
+ * （不是编码/截断问题）。同一意图换成「AI圈 新闻」则 5/5 相关。
+ * 实测佐证：以时效词起头的问句（最近/近期/今日/最新…）普遍 0 命中，
+ * 把时效词挪到句中或删掉后恢复正常；这不是请求形态问题——补 Cookie、
+ * 加 setmkt/setlang、换 www/cn 端点、加 filters 时效参数都**不能**改善（实测矩阵见该轮记录）。
+ *
+ * 时效语义并不因此丢失：**是否联网**由 decideWebSearch 的时效规则决定
+ * （命中「最近/最新」才触发检索），检索词只负责「查什么」。
  */
 export function cleanupQuery(message: string): string {
   const original = typeof message === 'string' ? message.trim() : '';
@@ -100,9 +136,24 @@ export function cleanupQuery(message: string): string {
     ' '
   );
   text = text.replace(/(搜索|检索|查询|查找|一下)/g, ' ');
+  // 前导时效词：可能叠加（「最近最新的…」），循环剥干净。
+  // 只有**真的剥掉了**时效词，才清理可能悬空下来的「的/款/个」——
+  // 否则会把「的士 价格」这类本来就以「的」开头的正常检索词弄坏。
+  for (let i = 0; i < 3; i += 1) {
+    const current = text.trim();
+    const stripped = current.replace(LEADING_FRESHNESS, '');
+    if (stripped === current) break;
+    text = stripped.replace(DANGLING_AFTER_FRESHNESS, '');
+  }
+  // 疑问外壳 → 空格，制造词边界（不要直接删，否则「有什么AI新闻」会粘成「AI新闻」
+  // 之外还会把相邻词合并，如「芯片行业有什么新闻」→「芯片行业新闻」才是想要的）
+  text = text.replace(QUESTION_SHELL, ' ');
   text = text.replace(/[，。！？、；：,.!?；:]{2,}/g, '，');
-  const cleaned = text.replace(/\s+/g, ' ').trim();
-  return cleaned === '' ? original : cleaned;
+  text = text.replace(/\s+/g, ' ').trim();
+  // 句末残留的语气/结构助词（「英伟达的股价怎么样」剥壳后 → 「英伟达的股价的」）
+  const withoutTail = text.replace(TRAILING_PARTICLES, '').trim();
+  if (withoutTail !== '') text = withoutTail;
+  return text === '' ? original : text;
 }
 
 const NOT_NEEDED: WebTriggerDecision = { needed: false, kind: 'none', reason: '', query: '', urls: [] };

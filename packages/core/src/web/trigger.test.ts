@@ -108,4 +108,33 @@ describe('cleanupQuery（检索词清洗）', () => {
   it('清洗后为空则回退原句（保证总有东西可查）', () => {
     expect(cleanupQuery('搜一下')).toBe('搜一下');
   });
+
+  /**
+   * 回归：Bing 的中文匹配会锚定在**首个词**上，口语问句的前导时效词会把整轮检索带偏。
+   * 实测「最近的AI圈有什么新闻」返回的是李圣杰的歌曲《最近》（2026-10-12，见 DEV_PLAN §5.10）。
+   * 因此前导时效词与疑问外壳都不能留在发给引擎的检索词里。
+   */
+  it('剥掉前导时效词：不让引擎锚定「最近」本身', () => {
+    expect(cleanupQuery('最近的AI圈有什么新闻')).toBe('AI圈 新闻');
+    expect(cleanupQuery('最近有什么AI新闻')).toBe('AI新闻');
+    expect(cleanupQuery('最近有什么科技新闻')).toBe('科技新闻');
+  });
+
+  it('剥掉疑问外壳（对检索引擎无信息量，反而干扰分词）', () => {
+    // 剥成空格而非直接删除：保留词边界，避免把相邻词粘成一个不存在的词
+    expect(cleanupQuery('最近的芯片行业有什么新闻')).toBe('芯片行业 新闻');
+    expect(cleanupQuery('最近英伟达的股价怎么样')).toBe('英伟达的股价');
+  });
+
+  it('不含时效词/疑问壳的正常查询保持原样（不误伤）', () => {
+    expect(cleanupQuery('Rust 的所有权')).toBe('Rust 的所有权');
+    expect(cleanupQuery('2026 年格莱美获奖名单')).toBe('2026 年格莱美获奖名单');
+    // 本来就以「的」开头的检索词不能被当成「悬空的的」剥掉
+    expect(cleanupQuery('的士 价格')).toBe('的士 价格');
+  });
+
+  it('剥掉时效词后悬空的量词/助词一并清掉', () => {
+    expect(cleanupQuery('最新款 iPhone 价格')).toBe('iPhone 价格');
+    expect(cleanupQuery('最新版本的 Node 是多少')).toBe('版本的 Node 是多少');
+  });
 });
