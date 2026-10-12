@@ -4,6 +4,7 @@
  */
 
 import type { AgentApprovalRequest, AgentToolNotice, ToolRisk } from './agent/registry';
+import type { PermissionsConfig, PermissionsSaveResult, ToolPolicy } from './agent/permissions';
 import type { ApiStyle } from './llm/types';
 import type { WebAccessConfig, WebSearchEngine } from './web/types';
 
@@ -82,6 +83,15 @@ export interface FairyApi {
     save(cfg: Partial<WebAccessConfig>): Promise<WebActionResult>;
     /** 试跑一次检索（验证链路与来源过滤，不落会话） */
     search(query: string): Promise<WebSearchTestResult>;
+  };
+  /**
+   * 工具权限档位（ADR-0002）：决定哪些工具调用仍需用户确认。
+   * 档位只改变「是否询问」，越界与策略拒绝照旧；保存后**下一轮对话**生效。
+   */
+  permissions: {
+    get(): Promise<PermissionsConfig>;
+    /** 保存档位（非法值被 main 拒绝）；返回归一后的完整配置 */
+    save(policy: ToolPolicy): Promise<PermissionsSaveResult>;
   };
   /** 日程（面板手动操作；意图路径在 main 内部直接写库） */
   events: {
@@ -325,6 +335,9 @@ export const IPC = {
   webGet: 'web:get',
   webSave: 'web:save',
   webSearch: 'web:search',
+  // ===== 工具权限档位（ADR-0002）：决定哪些工具调用仍需用户确认 =====
+  permissionsGet: 'permissions:get',
+  permissionsSave: 'permissions:save',
   eventList: 'event:list',
   eventAdd: 'event:add',
   eventComplete: 'event:complete',

@@ -1,8 +1,8 @@
 # Fairy 项目交接材料
 
-> 交接编号：**H15**（H1-H14 已归档；H8-H14 同对话前序快照）｜ 状态：**Web 通道已移除（H14）+ 渲染层 IPC 接缝已加深（H15：core 新增 FairyClient，renderer 新增 useResource/useAction，日程面板迁为试点面板，renderer 首次有测试）——两项改动均在**工作区未提交**；阶段 8/9/10 代码完成、自动化验收全绿（H15 复验 507 单测 + typecheck + build），GUI 人工验收待做（清单 §5 ⑤/⑥/⑦ 中 web 相关项已作废）；MVP GUI/干净虚拟机验收待做；下一步 = 阶段 8+9+10 GUI 验收 → tag m6/m7/m8** ｜ 更新时间：2026-10-10
+> 交接编号：**H16**（H1-H15 已归档；H8-H14 同对话前序快照）｜ 状态：**H16 = 工具权限档位（默认 / 只读放行 / 全放行）落地 + `docs/adr/0002` + 词表扩三词 —— 改动在工作区未提交**；H14（Web 通道移除）与 H15（渲染层 IPC 接缝）**均已入库**（合并于 `9de0bca`）；MVP 全阶段验收按提交 `79a395d` 已通过（**但 tag 现状存疑，见 §1**）；**H16 复验 580 单测 + typecheck + build 全绿**；下一步 = 提交本轮改动 → 用户确认 tag 现状** ｜ 更新时间：2026-10-11
 > 工作目录（绝对路径）：`C:\Users\91533\Desktop\Fairy`
-> **本次开发实际工作目录**：`C:\Users\91533\Desktop\Fairy.worktrees\project-overview-no-changes`（git worktree，main 分支）｜ **H14 有代码改动（未提交）**：Web 通道移除（core/main/preload/renderer/测试/打包/文档全链路）+ `AGENTS.md`「Agent skills」段 + `docs/agents/` 三文件
+> **本次开发实际工作目录**：`C:\Users\91533\Desktop\Fairy.worktrees\project-overview-no-changes`（git worktree，main 分支，HEAD=`f603c3d`「汉化」，2026-10-11）｜ **H16 有代码改动（未提交）**：11 改 + 5 新（清单见 §4 的 H16 段）；**H14/H15 已随 `9de0bca` 入库，不再是「未提交」**
 
 ## 1. 任务与版本
 
@@ -25,8 +25,11 @@
   - `5268007` 阶段 8 Skill + `0f4f13b` 阶段 8 MCP + `b51639e` docs/examples（阶段 8 实施备注与验收清单）
   - `8591b05` 阶段 9：cron 定时引擎（迁移 v4 + 调度/幂等/预授权暂停 + 定时面板）
   - `25c911c` 接口风格 Responses（`config.api.apiStyle`，chat 默认 / responses 可选）
-  - `ff20310` 阶段 10：联网检索（API 通道，`2026-10-10`，**当前 HEAD**）
-- **tag**：**`m1`/`m2`/`m3`/`m4`/`m5` 全部归位至 `3b1dcd6`**（2026-10-04 用户指示执行：`git tag -f m1 m2 m3` 从 `b001520` 移至修复+验收提交、补打 `m4`=阶段 6/M4、`m5`=阶段 7/M5 验收通过）。`m0` 不在当前 tag 列表（历史 squash 后未保留）。
+  - `ff20310` 阶段 10：联网检索（API 通道，`2026-10-10`）
+  - `9de0bca` 删除 web 留 API —— **H14 + H15 合并入库**（Web 通道全链路移除 + Fairy client/useResource/useAction + 日程面板试点 + renderer 测试基建 + `GLOSSARY.md` + `docs/adr/0001`，65 文件 1759+/2690-）
+  - `a9f83ff` 修复联网 BUG → `48e1132` 改人设 → `86ea361` 联网只用 bing → `79a395d` 版本 1.0.0：MVP 全阶段验收通过（补打 m6/m7/m8）→ `7f1e2b9` 附录 C：记录 electron 无法从工作区 node_modules 启动的根因与修复（主仓库 `.git` 丢失后就地重建仓库元数据并对接远端）→ `f603c3d` 汉化（**当前 HEAD**，2026-10-11）
+- **tag**：⚠️ **本地 `git tag` 当前只剩 `Fairy_1.0.0_Setup_64`** —— 曾在 `3b1dcd6` 的 `m1`-`m5` 与 `79a395d` 补打的 `m6`/`m7`/`m8` **均不在列表中**；结合 `7f1e2b9`「主仓库 `.git` 丢失后就地重建」的记载，疑为重建时一并丢失。**待用户确认是否重打 `m0`-`m8`（不擅自补打）**。
+- **远端**：`origin` = `https://github.com/longge1213812138/project-overview-no-changes.git`。
 - **文档版本**：`docs/DEV_PLAN.md` v0.3（MVP 后续路线图；范围含阶段 7–9，不含云同步/多用户）。
 
 ## 2. 权威资料
@@ -95,10 +98,11 @@
 | 阶段 9 cron 定时引擎 | ✅ **代码完成（2026-10-05），自动化验收全绿，待 GUI 人工验收** | **迁移 v4**：`cron_tasks`（next_run_at/last_fired_at/preauthorized JSON/catchup/max_retries/failure_limit/consecutive_failures/pause_reason）+ `cron_runs`（**UNIQUE(task_id,scheduled_for) 幂等键**、attempt/manual/next_retry_at/output/error）。core `agent/cron`：`schedule`（5 字段 cron+宏、Vixie OR、Intl 时区、DST 缺口跳过/重叠取早、latestDue 错过合并、未来无触发保存期拒绝，38 测）+ `store`（幂等 claim、并发 skipped、状态迁移守卫、失败暂停，27 测）+ `policy`（planTrigger/planRecovery 纯决策、**预授权硬条件+越界永不授予+升级暂停**、无人值守提示词，14 测）+ 迁移 3 测；main `cron.ts`（10s tick、启动恢复 running→interrupted/陈旧 pending 按 catchup、串行执行队列、仅 API 通道门控、超范围/连续失败→暂停+通知点通知切「定时」tab、重试指数退避、IPC 面）+ 7 驱动测试；renderer：底部「定时」tab `CronPanel`（新建/编辑/暂停/恢复/立即运行/删除/运行历史展开）。**入口隔离**：cron 执行面不进 index.web（断言 createCronStore/createCronAuthorizer/planTrigger/planRecovery）。证据：**全仓 409 单测 + typecheck + build 全绿**；语义与验收对照见 DEV_PLAN 阶段 9 实施备注。 |
 | 阶段 10 联网检索（API 通道） | ✅ **代码完成（2026-10-07）并已提交（`ff20310`「联网」，2026-10-10），自动化验收全绿，待 GUI 人工验收** | core `web/`：`types`（WebAccessConfig + 默认值）/ `urlguard`（协议·凭据·端口·IPv4/IPv6 私有段守卫 + 去重键 + 域名后缀匹配）/ `html`（零依赖：DDG 结果页抽取、页面正文抽取、内联标签不插空格）/ `search`（searchWeb 四道筛选 + fetchWebPage + 配置归一 + 中止抛 Abort）/ `trigger`（三类触发 + 排除面 + 检索词清洗，纯规则零 LLM 调用）/ `citations`（[n] 编号引用块 + 五条引用规范 + 失败说明）；工具 `agent/tools/web.ts`（`web_search`/`web_fetch`，approval 恒 **ask** / risk **read**，fetch 的 URL 守卫在 assess 即 deny）。main：`web.ts`（配置读写 + 检索编排 + 总预算 + 试跑）、`config.ts` 新增 `web` 段、`agent-tools.ts` 新增 `syncWebTools()`（开关关即卸载）、`chat.ts` 在 §5.1 ②c 注入引用块（仅 API 通道且 intent=chat）、sources 走 chatDone + meta 双路；renderer：设置页「联网检索」区（开关/条数/白黑名单/试跑）+ ChatPane 气泡下来源列表（点开走系统浏览器）。**入口隔离**：8 个执行面导出只进完整入口，entry-isolation 断言。证据：**core 新增 82（urlguard 16/html 10/search 20/trigger 14/citations 9/tools web 13）+ desktop 新增 14，全仓 505 单测 + typecheck + build 全绿**；语义对照见 DEV_PLAN §5.10。 |
 | 接口风格 Responses（插入需求） | ✅ **完成（2026-10-05），自动化验收全绿** | 设置页 API 表单新增「接口风格」选择：**Chat Completions**（默认，`…/v1/chat/completions`）/ **Responses**（`…/v1/responses`），落 `config.json api.apiStyle`（老配置缺省归一 chat）。core：`llm/responses.ts` 协议适配（ChatMessage[]→`input` 项含 function_call/function_call_output、扁平 tools、`max_output_tokens`、非流式 `output[]` 解析、流式事件累计 completed/failed/incomplete、空 arguments 归一 `{}`、failed 抛错不伪装成功）+ `client.ts` 按风格**端点归一**（完整方法路径换/保后缀不二次拼接、`…/v1` 直接接方法名，修复 `/v1` 再拼 `/v1/v1` 隐患）并抽出**共用 `consumeSse`**（chat 路径行为回归不变）。main：saveApi 校验+持久化 style、resolveActiveChannel 带 apiStyle、**探测缓存键含风格**；preload/契约 `ApiChannelConfig.apiStyle` / `ChannelState.api.style`；设置页状态条回显风格。聊天/意图/抽取/工具探测/cron 全部自动跟随风格。证据：**409 单测（llm 新增 35：协议 25 + HTTP 集成 10）+ typecheck + build 全绿**。 |
+| 工具权限档位（插入需求，H16） | ✅ **代码完成（2026-10-11），自动化验收全绿，待 GUI 人工验收（§5 ⑧）** | 三档 `permissions.toolPolicy`：`default`（逐工具按声明，现状零变化）/ `readonly`（额外放行**内置 + read**）/ `open`（全部免确认，含 shell/MCP/skill）。**不变量（ADR-0002）**：档位只放宽「是否询问」，`assess` 的 `deny`、「未注册」永远拒绝，`assess` 的 `ask`（越界）永远弹窗。core 新增 `agent/permissions.ts`（`requiresApproval`），`registry.ts` 的 `needsConfirm` 只替换 `reg.approval==='ask'` 一项；main 新增 `permissions.ts`（config 读写，无同步动作）+ `permissions:{get,save}` IPC（非法值显式抛错）；`config.ts` 新增 `permissions` 段（三处归一）；`chat.ts` 每轮传 `policy` → **下一轮对话生效**；设置页新增「工具权限档位」区（radio + 保存 + 全放行红色警示），联网/技能/MCP 三处旧「每次都要确认」文案改中性并指回该区。**有意破例**：`DEV_PLAN:255`「不可逆操作需单独审批」在 `open` 档被取代（含 skill 第三道防线），代价写入 ADR-0002 Consequences。证据：**580 单测全绿**（core 520 + 1 skipped；desktop 60；本轮新增 23）+ 三份 typecheck 绿 + build 绿。 |
 
-代码现状（**2026-10-10 H14 移除 Web 通道后**）：`packages/core` 含 llm/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7；skill/mcp，阶段 8；**cron/schedule+store+policy，阶段 9**；均仅完整入口，执行面不进 renderer）+ `web`（阶段 10 联网检索，同样仅完整入口）——**`gateway/` 已整体删除**；main 含 config/secrets/logger/autostart/diagnostics/channel/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools/skills/mcp/cron/**web**——**`sidecar.ts` 已删除，托盘红色告警机制删除**；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/CronPanel/SettingsTab（含 API 配置区+技能区+MCP 区+**联网区**，网页引导流与网关控制卡已删）+ ApprovalDialog + 底部 tab（聊天/日程/记忆/定时/设置）。**尚未做**：阶段 8/9/10 GUI 人工验收（清单 §5 ⑤/⑥/⑦）、MVP GUI 验收、干净虚拟机验收。
+代码现状（**2026-10-10 H14 移除 Web 通道后**）：`packages/core` 含 llm/sessions/store/memory/intent/calendar（阶段 2-5）与 agent（runtime/registry/capability/tools，阶段 7；skill/mcp，阶段 8；**cron/schedule+store+policy，阶段 9**；**permissions（H16：档位类型/归一/requiresApproval，纯策略 web-safe，随 agent 进 index.web 供设置页用类型）**；除 permissions 外均仅完整入口，执行面不进 renderer）+ `web`（阶段 10 联网检索，同样仅完整入口）——**`gateway/` 已整体删除**；main 含 config/secrets/logger/autostart/diagnostics/channel/ipc/chat/extract/notify-loop/windows/hotkeys + agent-approval/agent-tools/skills/mcp/cron/**web**/**permissions**（H16）——**`sidecar.ts` 已删除，托盘红色告警机制删除**；renderer 含 ChatPane/SessionSidebar/MemoryPanel/CalendarPanel/CronPanel/SettingsTab（含 API 配置区+**工具权限档位区（H16）**+技能区+MCP 区+**联网区**，网页引导流与网关控制卡已删）+ ApprovalDialog + 底部 tab（聊天/日程/记忆/定时/设置）。**尚未做**：H16 工具权限档位 GUI 人工验收（清单 §5 ⑧）；阶段 8/9/10 与 MVP GUI/干净虚拟机验收按提交 `79a395d`「MVP 全阶段验收通过」视为已完成（**tag 现状存疑，见 §1**）。
 
-**文档/仓库约定进展（2026-10-10，H13；H15 更新）**：`AGENTS.md` 新增「Agent skills」段（Issue tracker = GitHub issues in `longge1213812138/project-overview-no-changes`；Triage labels = 五个规范角色同名标签；Domain docs = 单上下文 `GLOSSARY.md` + `docs/adr/`），并新增 `docs/agents/{issue-tracker,triage-labels,domain}.md` 三份说明。**H15 起 `GLOSSARY.md` 与 `docs/adr/` 已创建**（`GLOSSARY.md` 收录 Fairy client / Resource / Action / Feedback；`docs/adr/0001-renderer-ipc-seam.md` 记录「渲染层只经 Fairy client 访问 main」）。以上均**未提交**。
+**文档/仓库约定进展（2026-10-10，H13；H15 更新）**：`AGENTS.md` 新增「Agent skills」段（Issue tracker = GitHub issues in `longge1213812138/project-overview-no-changes`；Triage labels = 五个规范角色同名标签；Domain docs = 单上下文 `GLOSSARY.md` + `docs/adr/`），并新增 `docs/agents/{issue-tracker,triage-labels,domain}.md` 三份说明。**H15 起 `GLOSSARY.md` 与 `docs/adr/` 已创建并入库**（`GLOSSARY.md` 收录 Fairy client / Resource / Action / Feedback；`docs/adr/0001-renderer-ipc-seam.md` 记录「渲染层只经 Fairy client 访问 main」）。**H16 追加**：`GLOSSARY.md` 新增**工具调用**、**风险级别**（read/write/exec）、**权限档位**（默认 / 只读放行 / 全放行；`_Avoid_` 权限等级、信任级别、模式）三词条；`docs/adr/0002-permission-tiers-ask-not-allow.md` 记录「权限档位只放宽是否询问，不放宽是否允许」（含 4 条被否决的替代方案与破例代价）。**H16 的这两处改动未提交**。
 
 **已解决/已知事实**（原“未确认项”已全部落地）：~~ds-free-api v0.2.11 本机下载+运行 OK；账号池+device_id 登录 OK（网关运行配置含临时明文，停止/退出即删，勿入 git）~~ → **随 Web 通道移除失效（2026-10-10）**：不再需要本机网关，接入只需 API baseUrl + Key（Key 由 DPAPI 保护）。
 
@@ -119,9 +123,30 @@
 - **验证**：**507 单测全绿**（core 472 passed + 1 skipped（新增 client 6）；desktop 35 passed（新增 renderer 11：`useResource` 4 + `CalendarPanel` 7））+ 三份 typecheck 绿 + `electron-vite build` 绿。
 - **未做（下一轮候选）**：其余 7 个面板（`SessionSidebar` 最简、`SettingsTab` 的 4 个自洽子区块、`MemoryPanel`/`CronPanel` 同构浅模块、`ChatPane` 的乐观更新留在面板）仍直调 `window.fairy`；`errText` 仍有 2 份（Memory/Cron）。
 
+**H16 工具权限档位（2026-10-11）——三档落地**（来源：用户需求「我想增加权限系统，默认、允许所有已读操作和完全开放」；经 `/grill-with-docs`（= grilling + domain-modeling 两个 skill）三轮共 **15 个决策**逐条确认后实现；工作区改动，未提交）：
+
+- **语义（唯一不变量：档位只放宽「是否询问」，不放宽「是否允许」——ADR-0002）**：
+  - `default`：逐工具按声明的 `approval` 判定。**与引入档位前逐字一致**（连 `get_current_time`、`web_search` 的恒 ask 都保留）→ 存量用户升级零变化；
+  - `readonly`：额外放行**内置且 `risk='read'`** 的工具（含联网检索）；**第三方自述的 read 不采信**（skill 的 risk 来自 manifest 自述，采信等于让自称只读的脚本免确认执行）；
+  - `open`：所有已注册工具免确认 —— **含 `shell`、MCP 工具、第三方 skill 脚本**；
+  - **三档共同底线**：`assess` 的 `deny` 与「未注册工具」永远拒绝；`assess` 的 `ask`（越界）永远弹窗并用一次明确点击授予 `allowOutside`。**切档不构成绕过一次审批的路径**（在途弹窗与在途那一轮不受影响，档位在下一轮对话生效）。
+- **改动清单（11 改 + 5 新）**：
+  - 新 `packages/core/src/agent/permissions.ts`：`ToolPolicy` / `TOOL_POLICIES` / `DEFAULT_TOOL_POLICY` / `DEFAULT_PERMISSIONS_CONFIG` / `normalizeToolPolicy` / `normalizePermissionsConfig`（脏值一律回落 `default`，方向越坏越保守）/ `requiresApproval(reg, policy)`；新 `packages/core/src/agent/permissions.test.ts`（9 测，含档位矩阵逐格对照 ADR 表格）。
+  - `packages/core/src/agent/registry.ts`：`AuthorizerOptions.policy`（缺省 `default` → 既有调用与测试零改动），`needsConfirm` 只把 `reg.approval === 'ask'` 换成 `requiresApproval(reg, policy)` —— **`assessment.decision` 那一侧逐字未动**，故越界/拒绝天然保留。`registry.test.ts` 追加 9 测（档位 × 审批链：readonly 不吃越界、open 不吃 deny、任何档位不放宽未注册、声明 auto 不被反转要求确认）。
+  - `packages/core/src/ipc.ts` + `agent/index.ts`：`permissions:{get,save}` 契约 + `permissions:get/save` 通道常量 + 导出 permissions（`index.web.ts` 随之带上，renderer 拿到类型）。
+  - 新 `apps/desktop/src/main/permissions.ts`（config 读写；**无任何同步动作**：`chat.ts` 每轮自取，故保存即对下一轮生效，与 web「保存后重装工具」不同）+ `permissions.test.ts`（5 测：缺省/脏配置回落、保存保留其它字段、落盘失败可见）。
+  - `apps/desktop/src/main/config.ts`：新增 `permissions` 段，assemble / strip / loadConfig 三处归一（照 `web` 段先例）。
+  - `apps/desktop/src/main/ipc.ts`：两条 handler；**非法档位显式抛错、不静默归一**（静默归一虽安全，但会把 renderer 的 bug 藏成「档位没生效」）。
+  - `apps/desktop/src/main/chat.ts`：`createRegistryAuthorizer` 传 `policy: getToolPolicy()`。
+  - `preload/index.ts` + `renderer/src/SettingsTab.tsx`（新「工具权限档位」区：三档 radio + 保存按钮 + 选中 `open` 时红色常驻警示；**不做**模态二次确认）+ `style.css`（该区 4 条样式，复用既有 `.toggle-row`/`.banner`）。
+  - **文案一致性**（防设置页自相矛盾）：`SettingsTab` 中联网 / 技能 / MCP 三处原「每次都要确认 / 每次调用逐一审批」改为中性表述并指回档位区；真相只在档位区一处呈现（同 ADR-0001 拒绝「手写域方法清单」的理由：同一事实写四遍必然漂移）。
+- **对 DEV_PLAN 的有意破例**：`DEV_PLAN.md:255`「高影响或不可逆操作需单独审批」在 `open` 档被取代——这等于拆掉 skill 自述三道防线（默认禁用 + 内容指纹 + **每次调用审批**）中的第三道。选择理由：用户点的档位名就是「全部」；且仓库自己声明「工作目录本身不构成 OS 隔离」，单独给 exec 留闸只是仪式感。代价已写入 ADR-0002 Consequences 与设置页红色警示。
+- **验证**：**580 单测全绿**（core 520 passed + 1 skipped；desktop 60 passed；本轮新增 23）+ 三份 `tsc --noEmit` 绿 + `electron-vite build` 绿（main 359.61 kB / preload 15.77 kB / renderer 1,562.33 kB）。
+- **本轮明确未做（勿当成遗漏）**：按工具的「总是允许此消息」记忆（档位已是全局粗粒度开关，再叠细粒度记忆会让「我现在到底放行了什么」无法回答）；`open` 档为 `exec` 保留闸；切档时的模态确认；**工具调用落库进消息历史**——`open` 档下事后只剩 main 日志可回溯，记为**独立议题**。
+
 ## 5. 接续动作
 
-**当前并行事项**：① **【阻塞在用户侧】阶段 8 GUI 人工验收**（清单见 §5 ⑤，样例 `examples/skills/demo-echo` + `examples/mcp-demo-server.js`，需 `pnpm dev` 重启）；② **【阻塞在用户侧】阶段 9 GUI 人工验收**（清单见 §5 ⑥）；③ **【阻塞在用户侧】阶段 10 联网检索 GUI 人工验收**（清单见 §5 ⑦，需外网可达）；④ MVP GUI/干净虚拟机验收（**H14 后不再有 web 项**）；⑤ 三项验收通过后打 tag `m6`（阶段 8）/`m7`（阶段 9）/`m8`（阶段 10）。
+**当前并行事项（H16 更新）**：① **【阻塞在用户侧】H16 工具权限档位 GUI 人工验收**（清单见 §5 ⑧）；② **【待用户确认】tag 现状**——本地 `git tag` 只剩 `Fairy_1.0.0_Setup_64`，`m0`-`m8` 是否重打（见 §1）；③ **H16 改动入库**（先复核 diff；建议单独一个提交，勿与其它改动混提）；④ 阶段 8/9/10 与 MVP GUI/干净虚拟机验收——按提交 `79a395d`「版本 1.0.0：MVP 全阶段验收通过（补打 m6/m7/m8）」视为**已完成**（清单 §5 ⑤/⑥/⑦ 保留待抽查）；⑤ 接缝深化下一轮 = 其余 7 个面板迁到 Fairy client（H15 遗留，未做）。
 
 **① GUI 验收清单（阶段 2/3/4/5 + 通道选择合并，DEV_PLAN §6 各阶段验收 + §9 M2/M3）**：
 1. `pnpm dev`（新终端，Node 24，`ELECTRON_RUN_AS_NODE` 未被继承）。
@@ -239,10 +264,25 @@
 9. **持久化**：来回切换/重启应用后设置保持不变；历史会话里这一轮的来源列表仍在（落 meta）。
 10. ~~网页通道不联网~~ → **已作废（2026-10-10 web 通道移除）**；改为：把 baseUrl 改坏（不可达）→ 触发检索类消息，日志显示检索失败且回复如实说明，不编造外部事实。
 
+**⑧ H16 工具权限档位 GUI 人工验收清单（2026-10-11 拟定；需 API 通道）**
+
+> 语义基准 = `docs/adr/0002-permission-tiers-ask-not-allow.md`；日志看 `[permissions]` 行与 `%APPDATA%/fairy/config.json` 的 `permissions.toolPolicy`。
+
+1. **默认态零变化**：不改设置直接聊 → 让模型调 `get_current_time` 或 `web_search` → **照旧弹审批框**；设置页档位区显示「当前档位：「默认」」。
+2. **只读放行**：切「只读放行」→ 保存（提示含「下一轮对话生效」）→ **下一轮**对话调 `get_current_time` / 触发联网检索 → **不再弹框**直接执行。
+3. **只读放行不吃越界（不变量）**：该档位下让模型用 `workspace_files` 读**工作区之外**的文件 → **仍弹框**且带越界红条。
+4. **只读放行不信第三方**：启用 `examples/skills/demo-echo`（自述只读）→ 该档位下调 `demo_echo` → **仍弹框**（只有「全放行」才免确认）。
+5. **全放行**：切「全放行」（radio 选中即出现红色警示条）→ 保存 → shell 命令 / MCP 工具 / skill 工具**均不再弹框**；日志出现 `[permissions] 工具权限档位 = open`。
+6. **全放行仍守两条底线（不变量）**：越界调用（工作区外路径 / shell 越界）**仍弹框**；被 `assess` 拒绝的调用（shell 白名单外命令、`web_fetch` 内网地址）**不弹框、直接拒绝**且拒绝原因对模型可见。
+7. **在途不受影响（不变量）**：留一个审批框**不处理** → 去设置页把档位改到「全放行」并保存 → 该框**不消失、也不被自动放行**，仍须手动允许/拒绝或等 60s 超时；本轮结束后下一轮才按新档位走。
+8. **持久化与容脏**：设「全放行」→ 重启 Fairy → 设置页仍显示「全放行」；手改 `config.json` 为非法值（`"toolPolicy":"whatever"`）→ 重启后回落「默认」且不崩。
+9. **非法值拒绝**：DevTools 里 `window.fairy.permissions.save('x')` → 报错「权限档位必须是 default / readonly / open」（**不静默归一**）。
+10. **文案一致性**：设置页「联网检索」「技能」「MCP」三处**不再**声称「每次都要确认」，改为指向「工具权限档位」；档位区的「定时任务不受此设置影响」说明可见。
+
 ## 6. 交接简区
 
-- 编号：**H15**（H1-H14 已完成归档；H8-H14=同对话前序快照；H14=**Web 通道彻底移除** + 仓库约定文档；H15=**渲染层 IPC 接缝深化**（Fairy client + 两个 hook + 日程面板试点 + renderer 测试基建）+ 词表/ADR 落地）
-- 源对话：本机 Pi 会话（阶段 7 GUI 验收闭环 + 阶段 8 Skill/MCP + 阶段 9 cron + 阶段 10 联网检索实现全程）；H13：阶段 10 提交入库（`ff20310`）+ `AGENTS.md`/`docs/agents/`；H14：按「彻底移除所有 Web 通道相关功能模块」完成全链路重构；H15：按 `/improve-codebase-architecture` 评审候选 1 完成接缝深化（三轮 grilling 确认方案）
-- 状态：**H15：渲染层接缝深化试点落地（2026-10-10，工作区改动未提交）；H14：Web 通道已移除（同一工作区）；阶段 7 GUI 验收通过（tag `m5`）；阶段 8/9/10 代码完成、自动化验收全绿，GUI 人工验收待执行（清单 §5 ⑤/⑥/⑦）**。提交链（H15 之前）：阶段 8（`5268007` + `0f4f13b`）→ 阶段 9（`8591b05`）→ 接口风格 Responses（`25c911c`）→ 阶段 10（`ff20310`，**当前 HEAD**）。**H15 复验：507 单测通过**（core 472 passed + 1 skipped；desktop 35 passed）+ **三份 typecheck 绿** + **`electron-vite build` 绿**；tag `m1`-`m5` 在 `3b1dcd6`（**`m6`/`m7`/`m8` 未打**）。MVP GUI/干净虚拟机验收待做（不再有 web 依赖）。
-- 用户已确认接续范围：阶段 7 全量（**已完成并验收**）；阶段 8 Skill/MCP（**代码完成待 GUI 验收**）；阶段 9 cron（**代码完成待 GUI 验收**）；阶段 10 联网检索（**代码完成待 GUI 验收**，默认开启、每次联网可见）；**唯一接入方式 = OpenAI 兼容 API**（web 通道已移除）；**渲染层经 Fairy client 访问 main**（ADR-0001）；无云同步/多用户。
-- **接续第一步**：① 用户执行 §5 ⑤（阶段 8）+ §5 ⑥（阶段 9）+ §5 ⑦（阶段 10）GUI 验收——同一次 `pnpm dev` 可一并走（阶段 10 需外网可达）；② 验收通过 → tag `m6`（阶段 8=M6）、`m7`（阶段 9=M7）、`m8`（阶段 10=M8）；③ 并行可做 MVP GUI/干净虚拟机验收收尾；④ H14+H15 改动如需入库，先复核 diff 再提交（建议分两个提交：Web 通道移除 / 接缝深化）；⑤ 接缝深化的下一轮 = 其余 7 个面板迁到 Fairy client（`SessionSidebar` 最简，可作为第二个试点验证通用性）。
+- 编号：**H16**（H1-H15 已完成归档；H8-H14=同对话前序快照；H14=**Web 通道彻底移除** + 仓库约定文档；H15=**渲染层 IPC 接缝深化**（Fairy client + 两个 hook + 日程面板试点 + renderer 测试基建）+ 词表/ADR 落地；H16=**工具权限档位三档落地** + `docs/adr/0002` + 词表扩「工具调用 / 风险级别 / 权限档位」）
+- 源对话：本机 Pi 会话（阶段 7 GUI 验收闭环 + 阶段 8 Skill/MCP + 阶段 9 cron + 阶段 10 联网检索实现全程）；H13：阶段 10 提交入库（`ff20310`）+ `AGENTS.md`/`docs/agents/`；H14：按「彻底移除所有 Web 通道相关功能模块」完成全链路重构；H15：按 `/improve-codebase-architecture` 评审候选 1 完成接缝深化（三轮 grilling 确认方案）；H16：按用户需求「增加权限系统：默认 / 允许所有已读操作 / 完全开放」经 `/grill-with-docs`（grilling + domain-modeling）**三轮共 15 个决策**逐条确认后实现
+- 状态：**H16：工具权限档位落地（2026-10-11，工作区改动未提交，5 新 + 11 改）；H16 复验 580 单测通过**（core 520 passed + 1 skipped；desktop 60 passed；本轮新增 23）+ **三份 typecheck 绿** + **`electron-vite build` 绿**。**入库状态（H16 之前全部已提交）**：`9de0bca`「删除 web 留 API」= **H14 + H15 合并入库**（65 文件）→ `a9f83ff` 修复联网 BUG → `48e1132` 改人设 → `86ea361` 联网只用 bing → `79a395d` 版本 1.0.0：MVP 全阶段验收通过（补打 m6/m7/m8）→ `7f1e2b9` 附录 C（主仓库 `.git` 丢失后就地重建）→ **`f603c3d`「汉化」= 当前 HEAD（2026-10-11）**。⚠️ **本地 tag 只剩 `Fairy_1.0.0_Setup_64`**：`m1`-`m5`（曾 `3b1dcd6`）与 `m6`-`m8`（曾 `79a395d`）均不在列表，疑随 `.git` 重建丢失——**待用户确认是否重打，不擅自补打**。
+- 用户已确认接续范围：阶段 7 全量（**已完成并验收**）；阶段 8 Skill/MCP、阶段 9 cron、阶段 10 联网检索（**代码完成，GUI 验收按 `79a395d` 视为已通过，清单 §5 ⑤/⑥/⑦ 保留待抽查**）；**H16 工具权限档位**（**代码完成待 GUI 验收**，清单 §5 ⑧）；**唯一接入方式 = OpenAI 兼容 API**；**渲染层经 Fairy client 访问 main**（ADR-0001）；**权限档位只放宽「是否询问」、不放宽「是否允许」**（ADR-0002）；无云同步/多用户。
+- **接续第一步**：① **提交 H16 改动**（先复核 `git diff`，建议单独一个提交，勿与其它改动混提）；② 用户执行 §5 ⑧（H16 权限档位 GUI 验收，重点看第 3 / 6 / 7 三条不变量）；③ **确认 tag 现状**并决定是否重打 `m0`-`m8`（见上）；④ 接缝深化下一轮 = 其余 7 个面板迁到 Fairy client（H15 遗留；`SessionSidebar` 最简，可作第二个试点验证通用性）；⑤ 可选独立议题 = 工具调用落库进消息历史（H16 明确未做：`open` 档下事后只剩 main 日志可回溯）。

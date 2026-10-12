@@ -225,6 +225,13 @@ body {
 }
 .toggle-row input { width: 15px; height: 15px; }
 
+/* ===== 工具权限档位（ADR-0002）：三档 radio + 各自的展开说明 ===== */
+.permissions-settings { margin-top: 10px; }
+/* 说明文字可能换行：radio 与首行对齐，不要垂直居中到整段中间 */
+.permissions-settings .toggle-row { margin: 6px 0; align-items: flex-start; }
+.permissions-settings .toggle-row input { margin-top: 2px; }
+.permissions-settings .banner { margin-top: 10px; }
+
 /* ===== 阶段 8：技能（Skill）列表 ===== */
 .skills-settings { margin-top: 10px; }
 .skills-head { display: flex; gap: 8px; margin-top: 8px; }

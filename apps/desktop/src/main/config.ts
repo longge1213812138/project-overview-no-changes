@@ -20,8 +20,13 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ApiChannelConfig, ChannelKind, WebAccessConfig } from '@fairy/core'
-import { normalizeWebAccessConfig } from '@fairy/core'
+import type {
+  ApiChannelConfig,
+  ChannelKind,
+  PermissionsConfig,
+  WebAccessConfig
+} from '@fairy/core'
+import { normalizePermissionsConfig, normalizeWebAccessConfig } from '@fairy/core'
 import { hadLegacyGatewaySecrets, readSecrets, writeSecrets } from './secrets'
 import type { SecretValues } from './secrets'
 
@@ -44,6 +49,11 @@ export interface FairyConfig {
    * 缺省 = 未显式配置 → getWebConfig() 返回 core 的默认值。
    */
   web?: WebAccessConfig
+  /**
+   * 工具权限档位（ADR-0002）：决定哪些工具调用仍需用户确认。
+   * 缺省 = 'default'（逐工具按声明的 approval 判定，与引入档位前一致）。
+   */
+  permissions?: PermissionsConfig
 }
 
 /** 单个技能的启用状态（config.json 明文字段，无凭据） */
@@ -76,6 +86,8 @@ interface PlaintextConfig {
   mcpServers?: { name: string; command: string; args: string[]; cwd?: string }[]
   /** 阶段 10：联网检索配置（无凭据，整份明文）；原始形态，归一在 assemble 里做 */
   web?: unknown
+  /** 工具权限档位（无凭据）；原始形态，归一在 assemble 里做 */
+  permissions?: unknown
 }
 
 export function configFilePath(): string {
@@ -182,6 +194,8 @@ function assemble(plain: PlaintextConfig, secrets: SecretValues): FairyConfig {
   }
   // 阶段 10：联网配置容脏（缺字段按 core 默认值补齐，越界值夹取，绝不因脏配置崩溃）
   cfg.web = normalizeWebAccessConfig(plain.web)
+  // 工具权限档位同样容脏：缺省/脏值一律回落 default（老配置升级后行为不变）
+  cfg.permissions = normalizePermissionsConfig(plain.permissions)
   return cfg
 }
 
@@ -206,6 +220,7 @@ function strip(cfg: FairyConfig): PlaintextConfig {
     }))
   }
   plain.web = normalizeWebAccessConfig(cfg.web)
+  plain.permissions = normalizePermissionsConfig(cfg.permissions)
   return plain
 }
 
@@ -274,7 +289,8 @@ export function loadConfig(): FairyConfig {
             : undefined,
         skills: normalizeSkills(o['skills']),
         mcpServers: normalizeMcpPlain(o['mcpServers']),
-        web: o['web']
+        web: o['web'],
+        permissions: o['permissions']
       }
       const cfg = assemble(plain, secrets)
       if (migrated) {

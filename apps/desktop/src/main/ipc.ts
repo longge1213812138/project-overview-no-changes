@@ -40,6 +40,7 @@ import {
 import { getPendingApprovals, respondApproval } from './agent-approval'
 import { syncWebTools } from './agent-tools'
 import { getWebConfig, saveWebConfig, testWebSearch } from './web'
+import { getPermissionsConfig, saveToolPolicy } from './permissions'
 import { getFloatWindow, getMainWindow } from './windows'
 import { log } from './logger'
 import { getEventStore } from './events'
@@ -196,6 +197,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.webSearch, (_event, query: unknown) =>
     testWebSearch(typeof query === 'string' ? query : '')
   )
+
+  // ===== 工具权限档位（ADR-0002）：只放宽「是否询问」；保存后下一轮对话生效 =====
+  ipcMain.handle(IPC.permissionsGet, () => getPermissionsConfig())
+  ipcMain.handle(IPC.permissionsSave, (_event, policy: unknown) => {
+    // renderer 输入不可信：非法值显式拒绝，不做静默归一
+    // （静默归一成 default 虽然安全，但会把 renderer 的 bug 藏成「档位没生效」）
+    if (policy !== 'default' && policy !== 'readonly' && policy !== 'open') {
+      throw new Error('权限档位必须是 default / readonly / open')
+    }
+    return saveToolPolicy(policy)
+  })
 
   // 外链一律系统浏览器；只放行 http/https，其他协议 reject
   ipcMain.handle('app:openExternal', async (_event, url: unknown) => {

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentAuthDecision } from './runtime';
 import type { AgentApprovalRequest, ToolRegistration } from './registry';
 import { ToolRegistry, ToolRegistryError, createRegistryAuthorizer } from './registry';
+import type { ToolPolicy } from './permissions';
+import { TOOL_POLICIES } from './permissions';
 import type { AgentTool } from './runtime';
 
 function makeTool(name = 'read_file'): AgentTool {
@@ -242,5 +244,152 @@ describe('createRegistryAuthorizer', () => {
     expect(confirm).toHaveBeenCalledWith(
       expect.objectContaining({ outside: false, tool: expect.objectContaining({ name: 'ask_tool' }) })
     );
+  });
+});
+
+/**
+ * 权限档位 × 审批链（ADR-0002）。这里是那条不变量的回归面：
+ * **档位只放宽「是否询问」（reg.approval），绝不放宽「是否允许」（assess 的 ask / deny
+ * 与「未注册」都不受档位影响）**。
+ */
+describe('createRegistryAuthorizer × 权限档位（ADR-0002）', () => {
+  /** policy 省略 = 不传该选项（验证缺省档行为与逐字现状一致） */
+  async function runOne(
+    reg: ToolRegistration,
+    policy?: ToolPolicy,
+    input: unknown = {}
+  ): Promise<{ decision: AgentAuthDecision; confirm: ReturnType<typeof vi.fn> }> {
+    const registry = new ToolRegistry();
+    registry.register(reg);
+    const confirm = vi.fn(async (_request: AgentApprovalRequest) => true);
+    const authorize = createRegistryAuthorizer(registry, {
+      confirm,
+      ...(policy !== undefined ? { policy } : {})
+    });
+    const name = reg.tool.definition.function.name;
+    const tool = registry.get(name)!.tool;
+    return { decision: asDecision(await authorize(tool, input)), confirm };
+  }
+
+  /** 内置只读工具（默认档下本来要问） */
+  const builtinRead = (): ToolRegistration =>
+    makeRegistration({
+      tool: makeTool('web_search'),
+      approval: 'ask',
+      risk: 'read',
+      source: 'builtin'
+    });
+
+  it('不传档位 = 默认档：内置只读工具照旧逐次确认（现状零变化）', async () => {
+    const { decision, confirm } = await runOne(builtinRead());
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(decision).toEqual({ approved: true, allowOutside: false });
+  });
+
+  it('readonly 档：内置只读工具免确认，confirm 不被调用', async () => {
+    const { decision, confirm } = await runOne(builtinRead(), 'readonly');
+    expect(confirm).toHaveBeenCalledTimes(0);
+    expect(decision).toEqual({ approved: true, allowOutside: false });
+  });
+
+  it('readonly 档不采信第三方自述的 read：skill 工具仍逐次确认', async () => {
+    const skillRead = makeRegistration({
+      tool: makeTool('skill_tool'),
+      approval: 'ask',
+      risk: 'read',
+      source: 'skill'
+    });
+    const { decision, confirm } = await runOne(skillRead, 'readonly');
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(decision.approved).toBe(true);
+  });
+
+  it('readonly 档不吃掉越界：assess ask(outside) 仍确认，批准后带 allowOutside', async () => {
+    const reg = makeRegistration({
+      tool: makeTool('workspace_files'),
+      approval: 'ask',
+      risk: 'read',
+      source: 'builtin',
+      assess: () => ({ decision: 'ask', outside: true, reason: '路径在工作区之外' })
+    });
+    const { decision, confirm } = await runOne(reg, 'readonly', { path: 'C:/other/x.txt' });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ outside: true }));
+    expect(decision).toEqual({ approved: true, allowOutside: true });
+  });
+
+  it('open 档：exec 级（内置 shell / MCP 扩展）免确认', async () => {
+    const shell = makeRegistration({
+      tool: makeTool('shell'),
+      approval: 'ask',
+      risk: 'exec',
+      source: 'builtin'
+    });
+    const mcp = makeRegistration({
+      tool: makeTool('mcp_tool'),
+      approval: 'ask',
+      risk: 'exec',
+      source: 'mcp'
+    });
+
+    const first = await runOne(shell, 'open');
+    const second = await runOne(mcp, 'open');
+
+    expect(first.confirm).toHaveBeenCalledTimes(0);
+    expect(second.confirm).toHaveBeenCalledTimes(0);
+    expect(first.decision.approved).toBe(true);
+    expect(second.decision.approved).toBe(true);
+  });
+
+  it('open 档不吃掉越界：assess ask(outside) 仍确认', async () => {
+    const reg = makeRegistration({
+      tool: makeTool('shell'),
+      approval: 'ask',
+      risk: 'exec',
+      assess: () => ({ decision: 'ask', outside: true, reason: '命令越出工作区' })
+    });
+    const { decision, confirm } = await runOne(reg, 'open', { command: 'x' });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(decision).toEqual({ approved: true, allowOutside: true });
+  });
+
+  it('open 档不吃掉 assess deny：档位不放宽「是否允许」', async () => {
+    const reg = makeRegistration({
+      tool: makeTool('shell'),
+      approval: 'ask',
+      risk: 'exec',
+      assess: () => ({ decision: 'deny', reason: '命令不在白名单内' })
+    });
+    const { decision, confirm } = await runOne(reg, 'open');
+    expect(decision).toEqual({ approved: false, reason: '命令不在白名单内' });
+    expect(confirm).toHaveBeenCalledTimes(0);
+  });
+
+  it('任何档位都不放宽「未注册工具」', async () => {
+    const registry = new ToolRegistry();
+    const confirm = vi.fn(async (_request: AgentApprovalRequest) => true);
+
+    for (const policy of TOOL_POLICIES) {
+      const authorize = createRegistryAuthorizer(registry, { confirm, policy });
+      const decision = asDecision(await authorize(makeTool('ghost'), {}));
+      expect(decision.approved, `policy=${policy}`).toBe(false);
+      expect(decision.reason).toContain('未在注册表登记');
+    }
+    expect(confirm).toHaveBeenCalledTimes(0);
+  });
+
+  it('工具声明 auto → 任何档位都不会反过来要求确认', async () => {
+    const autoRead = makeRegistration({
+      tool: makeTool('clock'),
+      approval: 'auto',
+      risk: 'read',
+      source: 'builtin'
+    });
+
+    for (const policy of TOOL_POLICIES) {
+      const { decision, confirm } = await runOne(autoRead, policy);
+      expect(confirm, `policy=${policy}`).toHaveBeenCalledTimes(0);
+      expect(decision.approved, `policy=${policy}`).toBe(true);
+    }
   });
 });

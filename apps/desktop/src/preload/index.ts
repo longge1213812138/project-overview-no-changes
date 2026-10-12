@@ -28,10 +28,13 @@ import type {
   McpActionResult,
   McpSaveInput,
   McpServerListItem,
+  PermissionsConfig,
+  PermissionsSaveResult,
   SessionMeta,
   SkillListItem,
   TabKey,
   TestChatResult,
+  ToolPolicy,
   WebAccessConfig,
   WebActionResult,
   WebSearchTestResult
@@ -73,6 +76,13 @@ contextBridge.exposeInMainWorld(
         ipcRenderer.invoke(IPC.webSave, cfg),
       search: (query: string): Promise<WebSearchTestResult> =>
         ipcRenderer.invoke(IPC.webSearch, query)
+    },
+
+    // ===== 工具权限档位（ADR-0002）：只改变「是否询问」，保存后下一轮对话生效 =====
+    permissions: {
+      get: (): Promise<PermissionsConfig> => ipcRenderer.invoke(IPC.permissionsGet),
+      save: (policy: ToolPolicy): Promise<PermissionsSaveResult> =>
+        ipcRenderer.invoke(IPC.permissionsSave, policy)
     },
 
     // ===== 阶段 5：日程（eventChanged 双路广播：面板手动操作 + 聊天管道/通知轮询） =====

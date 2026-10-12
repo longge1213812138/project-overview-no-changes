@@ -1,7 +1,7 @@
 {
   "name": "@fairy/desktop",
   "productName": "Fairy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Fairy desktop app (Electron + React)",
   "main": "out/main/index.js",

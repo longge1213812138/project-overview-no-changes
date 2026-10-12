@@ -20,6 +20,7 @@
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { FAIRY_VERSION } from '../../constants';
 import { buildMinimalEnv } from '../tools/shell';
 import { encodeJsonRpc, formatJsonRpcError, parseJsonRpcLine } from './protocol';
 import type { JsonRpcRequest } from './protocol';
@@ -290,7 +291,7 @@ export class McpClient {
         {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: {},
-          clientInfo: { name: 'Fairy', version: '0.0.1' }
+          clientInfo: { name: 'Fairy', version: FAIRY_VERSION }
         },
         timeoutMs
       );

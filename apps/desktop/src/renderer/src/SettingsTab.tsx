@@ -6,6 +6,7 @@ import type {
   McpServerListItem,
   SkillListItem,
   TestChatResult,
+  ToolPolicy,
   WebAccessConfig,
   WebSourceRef
 } from '@fairy/core'
@@ -229,6 +230,9 @@ export default function SettingsTab() {
       {/* ===== E. 应用设置（阶段 6 打包硬化）：开机自启 / 日志 / 诊断导出 ===== */}
       <AppSettingsSection />
 
+      {/* ===== I. 工具权限档位（ADR-0002）：放到最前面——它统管下方所有工具类小节 ===== */}
+      <PermissionsSection />
+
       {/* ===== H. 联网检索（阶段 10 / DEV_PLAN §5.10）：开关 / 来源范围 / 用量上限 / 试跑 ===== */}
       <WebSection />
 
@@ -326,13 +330,139 @@ function AppSettingsSection() {
   )
 }
 
+/** 档位 → 中文名（与 GLOSSARY.md「权限档位」词条同一套说法） */
+const POLICY_LABEL: Record<ToolPolicy, string> = {
+  default: '默认',
+  readonly: '只读放行',
+  open: '全放行'
+}
+
+/** 三档的展开说明：逐条说清「谁免确认」，不给「我以为是全自动」留余地 */
+const POLICY_OPTIONS: { value: ToolPolicy; desc: string }[] = [
+  {
+    value: 'default',
+    desc: '逐工具判定：内置只读工具也逐次确认（与引入档位前完全一致）'
+  },
+  {
+    value: 'readonly',
+    desc: '内置只读工具（含联网检索）免确认；写入/执行类工具与 skill、MCP 扩展仍逐次确认'
+  },
+  {
+    value: 'open',
+    desc: '所有工具免确认——含 shell 命令、MCP 工具与第三方技能脚本'
+  }
+]
+
+/**
+ * I. 工具权限档位（ADR-0002）。
+ *
+ * 界面口径必须与真实判定一一对应：
+ * - 档位只决定**要不要问你**，不决定**允不允许**：越出工作区的调用、被执行前策略拒绝的
+ *   调用，在任何档位下都照旧弹窗 / 拒绝；
+ * - 定时任务**不受此设置影响**（cron 只跑任务里预先授权的工具，从不弹窗）；
+ * - 保存后**下一轮对话生效**：在途弹窗与进行中的那一轮不受影响（切档不是绕过审批的路径）。
+ */
+function PermissionsSection() {
+  /** 已保存的档位（null = 尚未读到） */
+  const [saved, setSaved] = useState<ToolPolicy | null>(null)
+  /** radio 的当前选择（改完未保存时与 saved 不同） */
+  const [draft, setDraft] = useState<ToolPolicy | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<Feedback | null>(null)
+
+  useEffect(() => {
+    void window.fairy.permissions
+      .get()
+      .then((cfg) => {
+        setSaved(cfg.toolPolicy)
+        setDraft(cfg.toolPolicy)
+      })
+      .catch((e: unknown) => setMsg({ kind: 'err', text: `读取工具权限档位失败：${String(e)}` }))
+  }, [])
+
+  const dirty = draft !== null && saved !== null && draft !== saved
+
+  const handleSave = async (): Promise<void> => {
+    if (draft === null || saving) return
+    setSaving(true)
+    setMsg(null)
+    try {
+      const res = await window.fairy.permissions.save(draft)
+      if (res.ok && res.config) {
+        setSaved(res.config.toolPolicy)
+        setDraft(res.config.toolPolicy)
+        setMsg({
+          kind: 'ok',
+          text: `已保存为「${POLICY_LABEL[res.config.toolPolicy]}」——下一轮对话生效`
+        })
+      } else {
+        setMsg({ kind: 'err', text: `保存失败：${res.error ?? '未知错误'}` })
+      }
+    } catch (e) {
+      setMsg({ kind: 'err', text: `保存失败：${String(e)}` })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="permissions-settings">
+      <h3>工具权限档位</h3>
+      <p className="section-hint">
+        动工具之前，先由这一档决定「要不要问你」。它只管问不问、不管允不允许：越出工作区的调用、
+        被执行前策略拒绝的调用，任何档位下都照旧弹窗或拒绝。定时任务不受此设置影响（它只跑任务里
+        预先授权的工具，从不弹窗）。当前档位：
+        {saved === null ? '读取中…' : `「${POLICY_LABEL[saved]}」`}。
+      </p>
+      {draft === null ? (
+        <p className="section-hint">读取中…</p>
+      ) : (
+        <>
+          {POLICY_OPTIONS.map((opt) => (
+            <label key={opt.value} className="toggle-row">
+              <input
+                type="radio"
+                name="tool-policy"
+                value={opt.value}
+                checked={draft === opt.value}
+                disabled={saving}
+                onChange={() => setDraft(opt.value)}
+              />
+              <span>
+                <strong>{POLICY_LABEL[opt.value]}</strong> — {opt.desc}
+              </span>
+            </label>
+          ))}
+          {draft === 'open' && (
+            <p className="banner banner-err">
+              ⚠️ 全放行：Fairy 不再逐条征求同意，包括 shell 命令、MCP 工具与第三方技能脚本。
+              应用没有操作系统级沙箱——只剩「越出工作区」的调用仍会单独问你一次。
+            </p>
+          )}
+          <div className="app-actions">
+            <button
+              className="btn btn-primary"
+              disabled={saving || !dirty}
+              onClick={() => void handleSave()}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </>
+      )}
+      {msg && <p className={`inline-msg ${msg.kind === 'ok' ? 'msg-ok' : 'msg-err'}`}>{msg.text}</p>}
+    </section>
+  )
+}
+
 /**
  * H. 联网检索（阶段 10 / DEV_PLAN §5.10）。
  *
  * 界面口径（与真实的触发/审批口径一一对应，避免「我以为是全自动」的误会）：
  * - **触发**：默认只在「用户明确要求（联网/搜一下/帮我查…）」「涉及时效信息（最新/今天/新闻/天气…）」
  *   「直接给了链接」三类情况下联网，普通闲聊不联网；
- * - **工具**：`web_search` / `web_fetch` 两个工具随开关装配（模型主动调用时**每次都要确认**）；
+ * - **工具**：`web_search` / `web_fetch` 两个工具随开关装配（每次调用是否需确认由「工具权限
+ *   档位」判定，默认档 = 每次确认）；
  * - **可见**：每次检索都会在回答气泡下方列出实际用到的来源；关闭开关即卸载工具且不再外发请求。
  */
 function WebSection() {
@@ -428,7 +558,8 @@ function WebSection() {
       <p className="section-hint">
         Fairy 的外感官（仅 API 通道可用）。触发条件：① 你明确要求（联网/搜一下/帮我查…）；
         ② 问题涉及最新信息（最新/今天/新闻/天气/股价…）；③ 直接给出了链接。普通闲聊不联网。
-        每次检索都会在回答气泡下方列出实际用到的来源；模型主动调用 web_search / web_fetch 时每次都要你确认。
+        每次检索都会在回答气泡下方列出实际用到的来源；模型主动调用 web_search / web_fetch 时是否
+        逐次确认，由上方「工具权限档位」决定（默认档 = 每次确认）。
         检索词会发送给检索引擎（当前只用 Bing），关闭开关即完全不外发请求。
       </p>
       {cfg === null ? (
@@ -533,7 +664,8 @@ const SKILL_RISK_LABEL: Record<string, string> = { read: '只读', write: '写�
 /**
  * F. 技能 Skill（阶段 8 / DEV_PLAN §5.8）：
  * 列表（名称/版本/来源/声明权限/工具/错误可见）+ 启用/禁用 + 重新扫描。
- * 安全提示直出：新发现默认禁用、内容变更自动停用、启用后每次调用仍逐一审批。
+ * 安全提示直出：新发现默认禁用、内容变更自动停用、启用后其工具进入统一权限判定
+ * （默认档下每次调用仍逐一审批；档位口径见 PermissionsSection / ADR-0002）。
  */
 function SkillsSection() {
   const [items, setItems] = useState<SkillListItem[] | null>(null)
@@ -564,7 +696,7 @@ function SkillsSection() {
         setMsg({
           kind: 'ok',
           text: enabled
-            ? `已启用 ${name}：其工具进入统一审批链（每次调用均需在弹窗中确认）`
+            ? `已启用 ${name}：其工具进入统一权限判定（是否逐次确认见「工具权限档位」）`
             : `已禁用 ${name}`
         })
       } else {
@@ -596,9 +728,10 @@ function SkillsSection() {
       <h3>技能（Skill）</h3>
       <p className="section-hint">
         给 Fairy 装新本事：把技能包放入 <code>%APPDATA%\fairy\skills\&lt;目录&gt;\</code>（含 skill.json）。
-        新发现的技能默认禁用；包内容一变会自动停用、需重新启用；启用后其工具仍
-        <strong>每次调用逐一审批</strong>，审批框展示「扩展」徽标与来源/声明权限。
-        应用不提供任何网络安装来源。
+        新发现的技能默认禁用；包内容一变会自动停用、需重新启用；启用后其工具进入统一权限判定
+        （见上方「工具权限档位」——默认档下<strong>每次调用逐一审批</strong>），审批框展示
+        「扩展」徽标与来源/声明权限。技能自述的「只读」不被「只读放行」档采信，只有「全放行」
+        档会让第三方扩展免确认。应用不提供任何网络安装来源。
       </p>
       <div className="skills-head">
         <button className="btn" onClick={() => void handleReload()} disabled={busy !== null}>
@@ -748,7 +881,8 @@ function McpSection() {
       <h3>MCP 服务器</h3>
       <p className="section-hint">
         给 Fairy 接外挂：外部工具服务（stdio 协议）。不自动连接——保存后在列表手动「连接」，
-        其工具即进入统一审批链（「扩展」徽标 + 每次调用逐一确认）。环境变量（可能含 token）
+        其工具即进入统一权限判定（「扩展」徽标 + 按上方「工具权限档位」决定是否逐次确认；
+        默认档下每次逐一确认，只有「全放行」档会免确认）。环境变量（可能含 token）
         加密存入 DPAPI，此处只回显变量名；命令行不含 shell 解释，Windows 下需 node 脚本请直接填
         node.exe 绝对路径。
       </p>

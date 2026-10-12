@@ -3,14 +3,18 @@
  *
  * - 注册表持有强类型 schema（definition）+ 风险级别 + 审批策略 + 执行器；
  *   LLM 输出视为不可信输入：工具名必须命中注册表，输入先过 validateInput，
- *   再过 assess（策略钩子：越界/白名单判定），最后才是审批与执行。
+ *   再过 assess（策略钩子：越界/白名单判定），最后才是权限档位与审批、执行。
  * - 默认拒绝：无 authorize 回调、未注册、assess=deny、审批超时/拒绝 → 不执行。
- * - createRegistryAuthorizer 把注册表策略 + 用户审批回调合成 runtime 的 authorize，
- *   并把「越界确认」决策（allowOutside）穿透给执行器二次校验（防御纵深）。
+ * - createRegistryAuthorizer 把注册表策略 + 权限档位 + 用户审批回调合成 runtime 的
+ *   authorize，并把「越界确认」决策（allowOutside）穿透给执行器二次校验（防御纵深）。
+ * - **权限档位只放宽「是否询问」（reg.approval），不放宽「是否允许」**：assess 的
+ *   ask（越界）与 deny 与档位无关，永不被覆盖（ADR-0002）。
  * 本模块纯 TS、web-safe（不含 node 内建），renderer 只用类型与 ToolRegistry 策略面。
  */
 import type { ChatToolDefinition } from '../llm/types';
 import type { AgentAuthDecision, AgentAuthorize, AgentTool } from './runtime';
+import type { ToolPolicy } from './permissions';
+import { DEFAULT_TOOL_POLICY, requiresApproval } from './permissions';
 
 /** 风险级别：read = 只读；write = 有副作用；exec = 进程/系统级（审批 UI 按此着色） */
 export type ToolRisk = 'read' | 'write' | 'exec';
@@ -109,14 +113,20 @@ export interface AuthorizerOptions {
    * 未提供时：一切需审批的调用一律拒绝。
    */
   confirm?: (request: AgentApprovalRequest) => Promise<boolean>;
+  /**
+   * 权限档位（ADR-0002）：只放宽「是否询问」，不放宽「是否允许」。
+   * 缺省 'default' = 逐工具按 reg.approval 判定（引入档位前的行为，存量调用零改动）。
+   */
+  policy?: ToolPolicy;
   /** 审批 id 生成（测试可注入） */
   nextId?: () => number;
 }
 
 /**
  * 注册表 → runtime authorize。
- * 决策顺序：未注册 deny → assess deny → assess/approval 需确认则 confirm →
+ * 决策顺序：未注册 deny → assess deny → （assess 的 ask，或档位下仍需确认）则 confirm →
  * 批准后若 assess 标记越界则携带 allowOutside（执行器仍须自行二次校验）。
+ * 档位只参与第二项的审批判定；assess 的 ask/deny 与档位无关（ADR-0002）。
  */
 export function createRegistryAuthorizer(
   registry: ToolRegistry,
@@ -124,6 +134,7 @@ export function createRegistryAuthorizer(
 ): AgentAuthorize {
   let seq = 0;
   const nextId = options.nextId ?? ((): number => ++seq);
+  const policy = options.policy ?? DEFAULT_TOOL_POLICY;
   return async (tool: AgentTool, input: unknown): Promise<boolean | AgentAuthDecision> => {
     const name = tool.definition.function.name;
     const reg = registry.get(name);
@@ -136,7 +147,7 @@ export function createRegistryAuthorizer(
       return { approved: false, reason: assessment.reason ?? '工具策略拒绝执行' };
     }
 
-    const needsConfirm = assessment.decision === 'ask' || reg.approval === 'ask';
+    const needsConfirm = assessment.decision === 'ask' || requiresApproval(reg, policy);
     if (!needsConfirm) {
       return { approved: true, allowOutside: assessment.outside === true };
     }

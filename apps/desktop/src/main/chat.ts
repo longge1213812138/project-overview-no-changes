@@ -66,6 +66,7 @@ import { createIdleExtractor } from './extract'
 import type { IdleExtractor } from './extract'
 import { broadcast } from './windows'
 import { log } from './logger'
+import { getToolPolicy } from './permissions'
 
 let store: SessionStore | null = null
 
@@ -406,6 +407,9 @@ async function runGeneration(
       const registry = getToolRegistry()
       tools = registry.list().map((r) => r.tool)
       authorize = createRegistryAuthorizer(registry, {
+        // ADR-0002：每轮重取当前档位 → 保存后下一轮对话生效；
+        // 在途弹窗与在途那一轮不受影响（切档不构成绕过一次审批的路径）
+        policy: getToolPolicy(),
         // registry 的 confirm 负载自带 id（registry 内部 nextId 序列，每轮生成从 1
         // 重计，与审批生命周期无关）。显式剥离后再交 requestApproval——审批 id 由
         // agent-approval 的 seq 统一生成（曾因两者相撞导致第二次审批框不弹，H9 破案）

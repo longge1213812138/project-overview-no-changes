@@ -1,7 +1,7 @@
 {
   "name": "fairy",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Fairy - Windows personal assistant powered by OpenAI-compatible LLM APIs",
   "scripts": {
     "dev": "pnpm --filter @fairy/desktop dev",

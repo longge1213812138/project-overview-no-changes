@@ -6,4 +6,5 @@
  */
 export * from './runtime';
 export * from './registry';
+export * from './permissions';
 export * from './capability';
